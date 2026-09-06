@@ -54,7 +54,7 @@ The AI-Thinker ESP32-CAM has very few free GPIOs — the camera and microSD clai
 | 0 | boot strapping | jumper to GND only when flashing |
 | 1 / 3 | UART TX/RX | serial monitor / debug |
 
-> ⚠️ If you skip the microSD entirely, more pins free up — but the paper's design logs photos locally as backup, so keep it.
+> Note: If you skip the microSD entirely, more pins free up — but the paper's design logs photos locally as backup, so keep it.
 
 ---
 

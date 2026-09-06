@@ -1,4 +1,4 @@
-# SafeWay 🚗⚡
+# SafeWay
 
 **An IoT-Based Vehicle Speed Monitoring and Data Logging System for the CLSU Security & Safety Unit**
 
@@ -48,13 +48,13 @@ Speed = Gate Distance / Time between beam breaks
 
 ## Features
 
-- 🚀 Automatic speed detection via dual laser break-beam gates (no manual radar gun)
-- 📸 Photo evidence capture with microSD backup logging
-- ☁️ Cloud data logging through REST API integration
-- 🔔 On-site audible overspeed alert (active buzzer)
-- 🖥️ Web dashboard for authorized SSU personnel
-- 🔢 Plate number recognition from captured images
-- 💰 ~₱2,500 prototype cost vs. commercial radar/ANPR systems
+- Automatic speed detection via dual laser break-beam gates (no manual radar gun)
+- Photo evidence capture with microSD backup logging
+- Cloud data logging through REST API integration
+- On-site audible overspeed alert (active buzzer)
+- Web dashboard for authorized SSU personnel
+- Plate number recognition from captured images
+- ~₱2,500 prototype cost vs. commercial radar/ANPR systems
 
 ## Hardware
 

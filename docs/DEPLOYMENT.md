@@ -18,7 +18,7 @@ Criteria for the pilot lane — walk candidates with SSU:
 | WiFi | RSSI ≥ −70 dBm at the pole (test with a phone at mount height) | ESP32 upload reliability |
 | Mounting | Two rigid posts/poles/walls across the lane, ~1 m height | Gate transmitter/receiver pairs |
 | Background | No direct afternoon sun into receivers | Sunlight blinds laser receivers |
-| Safety | Lane remains passable; nothing overhanging traffic | Duh 🙂 |
+| Safety | Lane remains passable; nothing overhanging traffic | Duh |
 | SSU visibility | Near a guard post / patrol route | Physical deterrence + maintenance access |
 
 **Record on the survey sheet:** post GPS/pole IDs, measured gate separation, power outlet location, WiFi SSID + signal, photo of the site from both directions.
@@ -109,4 +109,4 @@ Take-down criteria (SSU decides): storm signal #2 or expected gusts > 60 km/h �
 
 ---
 
-Build chain complete: [BOM](BOM.md) → [HARDWARE](HARDWARE.md) → [FIRMWARE](FIRMWARE.md) → [BACKEND](BACKEND.md) → [TESTING](TESTING.md) → **DEPLOY** 🎉
+Build chain complete: [BOM](BOM.md) → [HARDWARE](HARDWARE.md) → [FIRMWARE](FIRMWARE.md) → [BACKEND](BACKEND.md) → [TESTING](TESTING.md) → **DEPLOY**

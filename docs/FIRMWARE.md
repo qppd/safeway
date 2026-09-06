@@ -41,7 +41,7 @@ Edit these constants at the top of the sketch before flashing:
 | `BEAM_BLOCKED_STATE` | Receiver OUT level when beam is blocked (from your HARDWARE.md polarity check) | `LOW` |
 | `EVENT_TIMEOUT_MS` | Both gates must trigger within this window (guards pedestrians loitering between gates) | `8000` |
 
-> ⚠️ ESP32-CAM connects to **2.4 GHz WiFi only** (802.11 b/g/n). It will not see 5 GHz networks.
+> Important: ESP32-CAM connects to **2.4 GHz WiFi only** (802.11 b/g/n). It will not see 5 GHz networks.
 
 ## 4. Firmware Sketch
 

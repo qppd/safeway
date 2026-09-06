@@ -247,7 +247,7 @@ Single page: table of recent incidents + photo pane + filter. Vanilla JS:
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-100 p-6">
-  <h1 class="text-2xl font-bold mb-4">🚗 SafeWay Violations</h1>
+  <h1 class="text-2xl font-bold mb-4">SafeWay Violations</h1>
 
   <div class="flex gap-3 mb-4">
     <select id="filter" class="border rounded p-2" onchange="load()">
@@ -281,7 +281,7 @@ async function load() {
         ${i.speed_kph.toFixed(1)} km/h</td>
       <td class="text-center font-mono">${i.plate_text ?? '—'}</td>
       <td class="text-center">${i.plate_confidence ? (i.plate_confidence * 100).toFixed(0) + '%' : '—'}</td>
-      <td class="text-center">${i.reviewed ? '✅' : '🆕'}</td>
+      <td class="text-center">${i.reviewed ? 'Reviewed' : 'New'}</td>
       <td><button onclick="show(${i.id})" class="text-blue-600 underline">view</button></td>
     </tr>`).join('');
 }
