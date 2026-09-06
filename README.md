@@ -110,8 +110,7 @@ safeway/
 │   ├── BACKEND.md          ← cloud API, database, dashboard
 │   ├── TESTING.md          ← calibration & accuracy tests
 │   └── DEPLOYMENT.md       ← site installation at CLSU SSU
-└── references/
-    └── safeway.pdf         ← capstone paper (44 pp)
+└── .gitignore              ← repo hygiene rules
 ```
 
 ## Build Guide
@@ -176,6 +175,6 @@ Adviser: Ryan L. Bermoza · Department of Information Technology, College of Eng
 
 ## Acknowledgment
 
-Pilot client: **CLSU Security & Safety Unit**. This project follows the PPDIOO network lifecycle framework (Cisco). The full academic manuscript is in [`references/safeway.pdf`](references/safeway.pdf).
+Pilot client: **CLSU Security & Safety Unit**. This project follows the PPDIOO network lifecycle framework (Cisco). The full academic manuscript is kept private and is available from the team on request.
 
 Per the capstone disclaimer: *"The project report or any portion thereof including the source code, or any section may be freely copied and distributed provided that the source is acknowledged."*
