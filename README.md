@@ -113,7 +113,8 @@ safeway/
 │   ├── FIRMWARE.md         ← both firmware sketches, flashing, tuning
 │   ├── BACKEND.md          ← cloud API, database, dashboard
 │   ├── TESTING.md          ← calibration & accuracy tests
-│   └── DEPLOYMENT.md       ← site installation guide
+│   ├── DEPLOYMENT.md       ← site installation guide
+│   ├── STACK.md            ← full technology stack reference
 └── .gitignore              ← repo hygiene rules
 ```
 
@@ -166,6 +167,7 @@ Software quality is assessed against **ISO/IEC 25010** and the IoT architecture 
 | [BACKEND.md](docs/BACKEND.md) | REST API spec, database schema, dashboard + live feed, plate recognition |
 | [TESTING.md](docs/TESTING.md) | Per-board bench tests, Doppler calibration, evaluation protocol + logs |
 | [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Site survey checklist, pole mounting, training, maintenance |
+| [STACK.md](docs/STACK.md) | Full technology stack — firmware, backend, frontend, rationale |
 
 ## Author
 
