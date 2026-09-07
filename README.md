@@ -115,6 +115,9 @@ safeway/
 │   ├── TESTING.md          ← calibration & accuracy tests
 │   ├── DEPLOYMENT.md       ← site installation guide
 │   ├── STACK.md            ← full technology stack reference
+│   ├── BLOCK-DIAGRAM.md    ← hardware blocks & signal chains
+│   ├── FLOWCHART.md        ← runtime decision logic
+│   ├── SYSTEM-ARCHITECTURE.md ← layers, interfaces, failure modes
 └── .gitignore              ← repo hygiene rules
 ```
 
@@ -168,6 +171,9 @@ Software quality is assessed against **ISO/IEC 25010** and the IoT architecture 
 | [TESTING.md](docs/TESTING.md) | Per-board bench tests, Doppler calibration, evaluation protocol + logs |
 | [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Site survey checklist, pole mounting, training, maintenance |
 | [STACK.md](docs/STACK.md) | Full technology stack — firmware, backend, frontend, rationale |
+| [BLOCK-DIAGRAM.md](docs/BLOCK-DIAGRAM.md) | Hardware blocks, signals, power distribution |
+| [FLOWCHART.md](docs/FLOWCHART.md) | Runtime logic — event pipeline, server pipeline, dashboard flow |
+| [SYSTEM-ARCHITECTURE.md](docs/SYSTEM-ARCHITECTURE.md) | Layers, component responsibilities, interfaces, failure modes |
 
 ## Author
 
