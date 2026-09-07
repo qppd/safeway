@@ -42,7 +42,7 @@ Serves one still endpoint and one stream endpoint, and saves every captured phot
 #include <SD_MMC.h>
 
 // ---------- CONFIG ----------
-const char* WIFI_SSID = "CLSU-Campus";     // 2.4 GHz network!
+const char* WIFI_SSID = "Campus-WiFi";     // 2.4 GHz network!
 const char* WIFI_PASS = "********";
 // ----------------------------
 
@@ -165,7 +165,7 @@ The brain: counts Doppler pulses, converts Hz→km/h, confirms with the laser br
 #include <ArduinoJson.h>   // Arduino Library Manager: "ArduinoJson" by Benoit Blanchon
 
 // ---------- CONFIG ----------
-const char* WIFI_SSID = "CLSU-Campus";
+const char* WIFI_SSID = "Campus-WiFi";
 const char* WIFI_PASS = "********";
 const char* CAM_IP    = "192.168.1.45";     // from safeway-cam serial
 const char* API_URL   = "http://192.168.1.10:8000/api/incidents";

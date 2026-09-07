@@ -1,4 +1,4 @@
-# Deployment Guide — Site Installation at CLSU SSU
+# Deployment Guide — Site Installation
 
 Taking the validated prototype from the bench to the pilot road: site survey, physical install, connectivity, SSU handover, and maintenance. (PPDIOO **Operate → Optimize**.)
 

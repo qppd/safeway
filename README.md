@@ -1,10 +1,10 @@
 # SafeWay
 
-**An IoT-Based Vehicle Speed Monitoring and Data Logging System for the CLSU Security & Safety Unit**
+**An IoT-Based Vehicle Speed Monitoring and Data Logging System for a Campus Security & Safety Unit**
 
 SafeWay is a low-cost, institutional-scale vehicle speed monitoring system. A 24 GHz Doppler radar measures vehicle speed directly on a campus road; a two-board ESP32 design photographs the vehicle, serves a live lane feed, logs the incident to a cloud database via API, and sounds a buzzer when the speed limit is exceeded. Security personnel monitor everything from a web dashboard — in real time.
 
-> Proof-of-concept capstone project — BS Information Technology, Central Luzon State University (April 2026)
+> Proof-of-concept capstone project (April 2026)
 
 ---
 
@@ -29,7 +29,7 @@ Overspeeding inside institutional campuses is monitored manually — by visual o
 
 SafeWay answers that gap with a **proof-of-concept** built from ~₱1,900 worth of off-the-shelf IoT parts: it measures speed with radar physics, captures evidence, recognizes plate numbers, logs to the cloud, and surfaces violations on a dashboard with a live camera feed — at institutional scale and budget.
 
-Pilot client: **Central Luzon State University — Security & Safety Unit (CLSU SSU)**. Development follows the **PPDIOO** lifecycle (Prepare, Plan, Design, Implement, Operate, Optimize).
+Pilot client: a university **Security & Safety Unit (SSU)**. Development follows the **PPDIOO** lifecycle (Prepare, Plan, Design, Implement, Operate, Optimize).
 
 ## How It Works
 
@@ -113,7 +113,7 @@ safeway/
 │   ├── FIRMWARE.md         ← both firmware sketches, flashing, tuning
 │   ├── BACKEND.md          ← cloud API, database, dashboard
 │   ├── TESTING.md          ← calibration & accuracy tests
-│   └── DEPLOYMENT.md       ← site installation at CLSU SSU
+│   └── DEPLOYMENT.md       ← site installation guide
 └── .gitignore              ← repo hygiene rules
 ```
 
@@ -167,18 +167,12 @@ Software quality is assessed against **ISO/IEC 25010** and the IoT architecture 
 | [TESTING.md](docs/TESTING.md) | Per-board bench tests, Doppler calibration, evaluation protocol + logs |
 | [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Site survey checklist, pole mounting, training, maintenance |
 
-## Team
+## Author
 
-BS Information Technology · Central Luzon State University
-
-- Roise Anthony M. Barles
-- Andrei P. Bernardo
-- Marcos A. Salazar
-
-Adviser: Ryan L. Bermoza · Department of Information Technology, College of Engineering
+**[QPPD](https://github.com/qppd)**
 
 ## Acknowledgment
 
-Pilot client: **CLSU Security & Safety Unit**. This project follows the PPDIOO network lifecycle framework (Cisco). The full academic manuscript is kept private and is available from the team on request.
+Pilot client: a university **Security & Safety Unit**. This project follows the PPDIOO network lifecycle framework (Cisco). The full academic manuscript is kept private and is available from the team on request.
 
 Per the capstone disclaimer: *"The project report or any portion thereof including the source code, or any section may be freely copied and distributed provided that the source is acknowledged."*
