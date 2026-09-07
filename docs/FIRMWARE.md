@@ -1,12 +1,17 @@
-# Firmware Guide — ESP32-CAM
+# Firmware Guide — Two-Board Architecture
 
-Setting up, configuring, and flashing the SafeWay speed-monitor firmware.
+Two independent sketches, one per board. Each flashes over its own USB port.
 
-**Estimated time:** 1–2 hours (including IDE setup)
+**Estimated time:** 1.5–2.5 hours (IDE setup + both flashes)
+
+| Sketch | Board | Job |
+|---|---|---|
+| `safeway-cam` | ESP32-CAM-MB | photo server: `/capture` (JPEG) + `/stream` (live MJPEG) + SD backup |
+| `safeway-hub` | ESP32 38-pin | Doppler speed + HC-SR04 confirm + buzzer + fetch photo + upload to API |
 
 ---
 
-## 1. Arduino IDE Setup
+## 1. Arduino IDE Setup (once, both boards use it)
 
 1. Install **Arduino IDE 2.x** — https://www.arduino.cc/en/software
 2. Add the ESP32 board package:
@@ -14,68 +19,34 @@ Setting up, configuring, and flashing the SafeWay speed-monitor firmware.
      ```
      https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
      ```
-   - *Tools → Board → Boards Manager* → search **esp32** → install **esp32 by Espressif Systems** (v2.x or later)
-3. Install the **CH340 driver** if Windows doesn't detect the USB-TTL adapter automatically (search "CH340G driver Windows").
-4. Libraries (*Tools → Manage Libraries*): **ArduinoJson** (by Benoit Blanchon). WiFi, HTTPClient, SD_MMC, and the ESP32 camera driver ship with the board package.
+   - *Tools → Board → Boards Manager* → search **esp32** → install **esp32 by Espressif Systems** (v2.x+)
+3. Drivers (both are usually automatic on Windows 10/11):
+   - **38-pin board:** CP2102 driver — https://www.silabs.com/developer-tools/usb-to-uart-bridge-vcp-drivers
+   - **CAM-MB board:** CH340 driver — https://www.wch-ic.com/downloads (only if the port doesn't appear)
+4. No extra libraries needed — WiFi, HTTPClient, base64, SD_MMC ship with the ESP32 core.
 
-## 2. Board Settings
+---
 
-| Setting | Value |
-|---|---|
-| Board | **AI Thinker ESP32-CAM** |
-| Partition Scheme | Huge APP (3MB No OTA/1MB SPIFFS) |
-| PSRAM | **Enabled** (required for photo capture) |
-| Upload Speed | 115200 (drop if upload fails) |
+## 2. Sketch 1 — `safeway-cam` (camera board)
 
-## 3. Configuration Block
-
-Edit these constants at the top of the sketch before flashing:
-
-| Constant | Meaning | Default / example |
-|---|---|---|
-| `WIFI_SSID` | 2.4 GHz campus/lab WiFi name | `"SafeWay-Test"` |
-| `WIFI_PASS` | WiFi password | — |
-| `API_URL` | Cloud API endpoint | `http://<server>:8000/api/incidents` |
-| `GATE_DISTANCE_M` | **Measured** center-to-center gate separation | `2.5` |
-| `SPEED_LIMIT_KPH` | Campus speed limit | `20.0` |
-| `BEAM_BLOCKED_STATE` | Receiver OUT level when beam is blocked (from your HARDWARE.md polarity check) | `LOW` |
-| `EVENT_TIMEOUT_MS` | Both gates must trigger within this window (guards pedestrians loitering between gates) | `8000` |
-
-> Important: ESP32-CAM connects to **2.4 GHz WiFi only** (802.11 b/g/n). It will not see 5 GHz networks.
-
-## 4. Firmware Sketch
+Serves one still endpoint and one stream endpoint, and saves every captured photo to microSD as the local backup.
 
 ```cpp
-/* ================================================================
-   SafeWay — IoT vehicle speed monitor (AI-Thinker ESP32-CAM)
-   Gates A & B = laser break-beams on GPIO 13 / 12
-   Speed = GATE_DISTANCE_M / (tB - tA)  ->  km/h = m/s * 3.6
-   Violation => buzzer (GPIO 15) + photo (OV2640)
-              => microSD backup + JSON POST to cloud API
-   NOTE: microSD runs in 1-bit mode (frees GPIO 12/13)
-   ================================================================ */
+/* safeway-cam — ESP32-CAM (AI-Thinker) on MB programmer board
+   Endpoints:  /capture  -> single JPEG (also saved to microSD)
+               /stream   -> MJPEG live feed (dashboard "Live" pane)
+               /         -> tiny status page                                  */
+
 #include "esp_camera.h"
 #include <WiFi.h>
-#include <HTTPClient.h>
-#include <ArduinoJson.h>
 #include <SD_MMC.h>
-#include <base64.h>
 
-// ---------------- CONFIG ----------------
-const char* WIFI_SSID     = "YOUR_SSID";
-const char* WIFI_PASS     = "YOUR_PASS";
-const char* API_URL       = "http://192.168.1.50:8000/api/incidents";
-const float GATE_DISTANCE_M  = 2.5;    // <-- measure this on site!
-const float SPEED_LIMIT_KPH  = 20.0;
-const int   BEAM_BLOCKED_STATE = LOW;  // receiver OUT when beam blocked
-const unsigned long EVENT_TIMEOUT_MS = 8000;
+// ---------- CONFIG ----------
+const char* WIFI_SSID = "CLSU-Campus";     // 2.4 GHz network!
+const char* WIFI_PASS = "********";
+// ----------------------------
 
-// ---------------- PINS ----------------
-#define PIN_GATE_A 13
-#define PIN_GATE_B 12
-#define PIN_BUZZER 15
-
-// AI-Thinker ESP32-CAM camera pin map
+// AI-Thinker ESP32-CAM pin model
 #define PWDN_GPIO_NUM  32
 #define RESET_GPIO_NUM -1
 #define XCLK_GPIO_NUM   0
@@ -93,152 +64,279 @@ const unsigned long EVENT_TIMEOUT_MS = 8000;
 #define HREF_GPIO_NUM  23
 #define PCLK_GPIO_NUM  22
 
-// ---------------- STATE ----------------
-volatile unsigned long tA = 0, tB = 0;
-volatile int lastA = HIGH, lastB = HIGH;
+WiFiServer server(80);
+int snapCount = 0;
 
-void IRAM_ATTR gateA_ISR() {
-  int s = digitalRead(PIN_GATE_A);
-  if (s != lastA && s == BEAM_BLOCKED_STATE && tA == 0) tA = micros();
-  lastA = s;
-}
-void IRAM_ATTR gateB_ISR() {
-  int s = digitalRead(PIN_GATE_B);
-  if (s != lastB && s == BEAM_BLOCKED_STATE && tB == 0) tB = micros();
-  lastB = s;
-}
-
-// ---------------- CAMERA ----------------
-bool cameraInit() {
-  camera_config_t cfg = {};
-  cfg.ledc_channel = LEDC_CHANNEL_0;
-  cfg.ledc_timer   = LEDC_TIMER_0;
-  cfg.pin_pwdn     = PWDN_GPIO_NUM;  cfg.pin_reset = RESET_GPIO_NUM;
-  cfg.pin_xclk     = XCLK_GPIO_NUM;  cfg.pin_sscb_sda = SIOD_GPIO_NUM;
-  cfg.pin_sscb_scl = SIOC_GPIO_NUM;  cfg.pin_y9 = Y9_GPIO_NUM;
-  cfg.pin_y8 = Y8_GPIO_NUM;  cfg.pin_y7 = Y7_GPIO_NUM;  cfg.pin_y6 = Y6_GPIO_NUM;
-  cfg.pin_y5 = Y5_GPIO_NUM;  cfg.pin_y4 = Y4_GPIO_NUM;  cfg.pin_y3 = Y3_GPIO_NUM;
-  cfg.pin_y2 = Y2_GPIO_NUM;  cfg.pin_vsync = VSYNC_GPIO_NUM;
-  cfg.pin_href = HREF_GPIO_NUM;  cfg.pin_pclk = PCLK_GPIO_NUM;
-  cfg.xclk_freq_hz = 20000000;
-  cfg.pixel_format  = PIXFORMAT_JPEG;
-  cfg.frame_size    = FRAMESIZE_SVGA;   // 800x600 — plate-legible, small upload
-  cfg.jpeg_quality  = 12;               // lower = better
-  cfg.fb_count      = 1;
-  cfg.grab_mode     = CAMERA_GRAB_LATEST;
-  esp_err_t err = esp_camera_init(&cfg);
-  if (err != ESP_OK) { Serial.printf("camera fail 0x%x\n", err); return false; }
-  sensor_t* s = esp_camera_sensor_get();
-  s->set_vflip(s, 1);                   // flip if mounted upside-down
-  return true;
+bool camInit() {
+  camera_config_t cc = {};
+  cc.ledc_channel = LEDC_CHANNEL_0;
+  cc.ledc_timer   = LEDC_TIMER_0;
+  cc.pin_pwdn     = PWDN_GPIO_NUM;  cc.pin_reset = RESET_GPIO_NUM;
+  cc.pin_xclk     = XCLK_GPIO_NUM;  cc.pin_ssc_siod = SIOD_GPIO_NUM;
+  cc.pin_ssc_sioc = SIOC_GPIO_NUM;  cc.pin_vsync = VSYNC_GPIO_NUM;
+  cc.pin_href     = HREF_GPIO_NUM;  cc.pin_pclk  = PCLK_GPIO_NUM;
+  cc.pin_d0 = Y2_GPIO_NUM; cc.pin_d1 = Y3_GPIO_NUM;
+  cc.pin_d2 = Y4_GPIO_NUM; cc.pin_d3 = Y5_GPIO_NUM;
+  cc.pin_d4 = Y6_GPIO_NUM; cc.pin_d5 = Y7_GPIO_NUM;
+  cc.pin_d6 = Y8_GPIO_NUM; cc.pin_d7 = Y9_GPIO_NUM;
+  cc.xclk_freq_hz = 20000000;
+  cc.pixel_format = PIXFORMAT_JPEG;
+  cc.frame_size   = FRAMESIZE_SVGA;      // 800x600 — plate-readable, small upload
+  cc.jpeg_quality = 12;                   // lower = better, heavier
+  cc.fb_count     = 1;
+  cc.grab_mode    = CAMERA_GRAB_LATEST;
+  return esp_camera_init(&cc) == ESP_OK;
 }
 
-String capturePhotoBase64() {
-  camera_fb_t* fb = esp_camera_fb_get();
-  if (!fb) return "";
-  String b64 = base64::encode(fb->buf, fb->len);
-  // save backup copy to SD
-  static int n = 0;
-  String path = "/sw_" + String(millis()) + "_" + String(n++) + ".jpg";
+void sdSave(camera_fb_t* fb) {
+  String path = "/sw_" + String(millis()) + "_" + String(snapCount++) + ".jpg";
   File f = SD_MMC.open(path, FILE_WRITE);
   if (f) { f.write(fb->buf, fb->len); f.close(); }
-  esp_camera_fb_return(fb);
+}
+
+void setup() {
+  Serial.begin(115200);
+  if (!camInit()) { Serial.println("CAMERA FAIL"); while (true) delay(100); }
+  SD_MMC.begin("/sdcard", true);            // 1-bit mode: leaves GPIOs free
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  while (WiFi.status() != WL_CONNECTED) { delay(200); Serial.print("."); }
+  Serial.println("\nCAM ready at http://" + WiFi.localIP().toString());
+  server.begin();
+}
+
+void loop() {
+  WiFiClient c = server.available();
+  if (!c) return;
+  String req = c.readStringUntil('\r'); c.readStringUntil('\n');
+  String path = req.substring(req.indexOf(' ') + 1);
+  path = path.substring(0, path.indexOf(' '));
+
+  camera_fb_t* fb = nullptr;
+  if (path == "/capture" || path == "/") {
+    fb = esp_camera_fb_get();
+    if (fb && path == "/capture") sdSave(fb);
+  }
+
+  if (path == "/capture" && fb) {           // single JPEG
+    c.println("HTTP/1.1 200 OK\nContent-Type: image/jpeg");
+    c.println("Content-Length: " + String(fb->len) + "\n");
+    c.write(fb->buf, fb->len);
+    esp_camera_fb_return(fb);
+  }
+  else if (path == "/stream") {             // MJPEG live feed
+    if (fb) esp_camera_fb_return(fb);
+    c.println("HTTP/1.1 200 OK\nContent-Type: multipart/x-mixed-replace; boundary=sw");
+    while (c.connected()) {
+      fb = esp_camera_fb_get();
+      if (!fb) continue;
+      c.println("--sw\nContent-Type: image/jpeg");
+      c.println("Content-Length: " + String(fb->len) + "\n");
+      c.write(fb->buf, fb->len);
+      c.println();
+      esp_camera_fb_return(fb);
+      // ~10 fps cap
+    }
+  }
+  else if (path == "/" && fb) {             // status page
+    if (fb) esp_camera_fb_return(fb);
+    c.println("HTTP/1.1 200 OK\nContent-Type: text/html\n\n"
+              "<h2>SafeWay CAM</h2>/capture /stream OK");
+  }
+  else c.println("HTTP/1.1 404\nConnection: close\n");
+  delay(5); c.stop();
+}
+```
+
+**Write down the IP it prints** (e.g. `192.168.1.45`) — the hub and the dashboard both need it. For production, give the CAM a **DHCP reservation** on the campus router so it never changes ([DEPLOYMENT.md §pre-install](DEPLOYMENT.md#2-pre-install-checklist)).
+
+---
+
+## 3. Sketch 2 — `safeway-hub` (38-pin sensor board)
+
+The brain: counts Doppler pulses, converts Hz→km/h, confirms with HC-SR04, buzzes on overspeed, fetches the photo from the CAM, uploads the incident.
+
+```cpp
+/* safeway-hub — ESP32 38-pin (sensor hub)
+   GPIO 34 = CDM324 OUT | GPIO 26/25 = HC-SR04 TRIG/ECHO | GPIO 27 = buzzer */
+
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <base64.h>
+#include <ArduinoJson.h>   // Arduino Library Manager: "ArduinoJson" by Benoit Blanchon
+
+// ---------- CONFIG ----------
+const char* WIFI_SSID = "CLSU-Campus";
+const char* WIFI_PASS = "********";
+const char* CAM_IP    = "192.168.1.45";     // from safeway-cam serial
+const char* API_URL   = "http://192.168.1.10:8000/api/incidents";
+const float HZ_PER_KPH = 44.7;              // CDM324 @ 24.125 GHz
+                                            // (HB100 10.525 GHz variant: 19.49)
+const float COSINE_ANGLE_DEG = 0.0;         // set if mounted off-axis (see HARDWARE §8)
+const float SPEED_LIMIT_KPH  = 30.0;         // campus limit
+const float MIN_SPEED_KPH   = 5.0;          // below this = noise, ignore
+const float TRIGGER_DIST_CM  = 350.0;        // HC-SR04: "vehicle is HERE" distance
+// ----------------------------
+
+#define PIN_RADAR   34
+#define PIN_TRIG    26
+#define PIN_ECHO    25
+#define PIN_BUZZER   27
+
+volatile uint32_t pulses = 0;
+IRAM_ATTR void onPulse() { pulses++; }
+
+uint32_t readHCSR04_cm() {                  // blocking ~30 ms max
+  digitalWrite(PIN_TRIG, LOW);  delayMicroseconds(2);
+  digitalWrite(PIN_TRIG, HIGH); delayMicroseconds(10);
+  digitalWrite(PIN_TRIG, LOW);
+  uint32_t us = pulseIn(PIN_ECHO, HIGH, 30000);
+  return us / 58;                           // us -> cm
+}
+
+float lastKph = 0, peakKph = 0, peakHz = 0;
+uint32_t winStart = 0, lastActiveMs = 0;
+bool inEvent = false, hcConfirmed = false;
+
+float kphFromHz(float hz) {
+  float measured = hz / HZ_PER_KPH;
+  if (COSINE_ANGLE_DEG > 0.1) measured /= cos(COSINE_ANGLE_DEG * PI / 180.0);
+  return measured;
+}
+
+bool uploadIncident(float kph, float hz, bool confirmed, const String& photoB64) {
+  WiFiClient wc; HTTPClient http;
+  http.begin(wc, API_URL);
+  http.addHeader("Content-Type", "application/json");
+  String body = "{\"device_id\":\"safeway-01\",\"speed_kph\":" + String(kph, 1)
+              + ",\"limit_kph\":" + String(SPEED_LIMIT_KPH, 0)
+              + ",\"doppler_hz\":" + String(hz, 0)
+              + ",\"confirmed\":" + (confirmed ? "true" : "false")
+              + ",\"photo_b64\":\"" + photoB64 + "\"}";
+  int code = http.POST(body);
+  http.end();
+  return code == 200 || code == 201;
+}
+
+String fetchPhotoB64() {                    // GET /capture from the CAM
+  WiFiClient wc; HTTPClient http;
+  http.begin(wc, String("http://") + CAM_IP + "/capture");
+  int code = http.GET();
+  if (code != 200) { http.end(); return ""; }
+  int len = http.getSize();
+  String b64;
+  if (len > 0) b64.reserve(base64::encodeLength(len));
+  WiFiClient* s = http.getStreamPtr();
+  uint8_t buf[512];
+  int got;
+  while ((got = s->readBytes(buf, sizeof(buf))) > 0)
+    b64 += base64::encode(buf, got);
+  http.end();
   return b64;
 }
 
-// ---------------- SETUP ----------------
 void setup() {
   Serial.begin(115200);
-  pinMode(PIN_GATE_A, INPUT); pinMode(PIN_GATE_B, INPUT);
+  pinMode(PIN_RADAR, INPUT);
+  pinMode(PIN_TRIG, OUTPUT); pinMode(PIN_ECHO, INPUT);
   pinMode(PIN_BUZZER, OUTPUT); digitalWrite(PIN_BUZZER, LOW);
-
-  // microSD in 1-bit mode -> frees GPIO 12/13 for the gates
-  if (!SD_MMC.begin("/sdcard", true))
-    Serial.println("SD init failed (continuing without backup)");
-
-  cameraInit();
-
-  WiFi.mode(WIFI_STA);
+  attachInterrupt(digitalPinToInterrupt(PIN_RADAR), onPulse, RISING);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
-  Serial.print("WiFi");
-  while (WiFi.status() != WL_CONNECTED) { delay(300); Serial.print("."); }
-  Serial.println(" connected: " + WiFi.localIP().toString());
-
-  attachInterrupt(digitalPinToInterrupt(PIN_GATE_A), gateA_ISR, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(PIN_GATE_B), gateB_ISR, CHANGE);
-  Serial.println("SafeWay ready. Waiting for vehicles...");
+  while (WiFi.status() != WL_CONNECTED) { delay(200); Serial.print("."); }
+  Serial.println("\nSafeWay HUB ready");
 }
 
-// ---------------- LOOP ----------------
 void loop() {
-  unsigned long a = tA, b = tB;
-  if (a && b) {                          // both gates tripped
-    float dt_s   = (b - a) / 1e6;
-    float kph    = (GATE_DISTANCE_M / dt_s) * 3.6;
-    Serial.printf("PASS  dt=%.4fs  speed=%.1f km/h\n", dt_s, kph);
+  // --- 300 ms Doppler window ---
+  if (millis() - winStart < 300) return;
+  uint32_t elapsed = millis() - winStart;
+  noInterrupts(); uint32_t p = pulses; pulses = 0; interrupts();
+  float hz  = (float)p * 1000.0f / elapsed;
+  float kph = kphFromHz(hz);
+  winStart = millis();
 
-    if (kph > SPEED_LIMIT_KPH) reportViolation(kph, dt_s);
-    delay(1500);                         // re-arm cooldown
-    tA = 0; tB = 0;
+  if (WiFi.status() != WL_CONNECTED) WiFi.reconnect();
+
+  // --- event state machine ---
+  if (kph >= MIN_SPEED_KPH) {
+    if (!inEvent) { inEvent = true; peakKph = 0; peakHz = 0; hcConfirmed = false; }
+    if (kph > peakKph) { peakKph = kph; peakHz = hz; }
+    lastActiveMs = millis();
+
+    // HC-SR04: is a vehicle physically in the trigger zone?
+    uint32_t dist = readHCSR04_cm();
+    if (dist > 1 && dist < TRIGGER_DIST_CM) hcConfirmed = true;
+
+    // buzzer: live warn while actively speeding
+    digitalWrite(PIN_BUZZER, kph > SPEED_LIMIT_KPH ? HIGH : LOW);
+
+    if (kph > SPEED_LIMIT_KPH) Serial.printf("ACTIVE %.1f km/h (%.0f Hz) d=%u cm\n",
+                                             kph, hz, dist);
   }
-  if (a && !b && millis() - (a / 1000) > EVENT_TIMEOUT_MS) { tA = 0; }  // stale gate A
-  if (b && !a && millis() - (b / 1000) > EVENT_TIMEOUT_MS) { tB = 0; }  // stale gate B
-  delay(10);
-}
-
-// ---------------- REPORT ----------------
-void reportViolation(float kph, float dt_s) {
-  Serial.println(">>> VIOLATION — capture + upload");
-  digitalWrite(PIN_BUZZER, HIGH);
-  String photoB64 = capturePhotoBase64();
-  digitalWrite(PIN_BUZZER, LOW);         // buzzer duration = capture window
-
-  StaticJsonDocument<96 * 1024> doc;     // sized for ~64KB base64 photo
-  doc["device_id"]   = "safeway-gate-01";
-  doc["speed_kph"]   = roundf(kph * 10) / 10.0;
-  doc["dt_ms"]       = (long)((b - a) / 1000);
-  doc["gate_m"]      = GATE_DISTANCE_M;
-  doc["limit_kph"]   = SPEED_LIMIT_KPH;
-  doc["photo_b64"]   = photoB64;
-
-  if (WiFi.status() == WL_CONNECTED) {
-    HTTPClient http;
-    http.begin(API_URL);
-    http.addHeader("Content-Type", "application/json");
-    http.setTimeout(10000);
-    int code = http.POST(String(doc.as<String>()));
-    Serial.printf("POST /api/incidents -> %d\n", code);
-    http.end();
-  } else {
-    Serial.println("WiFi lost — photo retained on SD for later sync");
+  else if (inEvent) {
+    digitalWrite(PIN_BUZZER, LOW);
+    if (millis() - lastActiveMs > 1500) {   // lane clear -> close event
+      inEvent = false;
+      if (peakKph > SPEED_LIMIT_KPH) {       // VIOLATION
+        Serial.printf("VIOLATION peak %.1f km/h | confirmed=%s\n",
+                      peakKph, hcConfirmed ? "yes" : "no");
+        // confirm beep
+        for (int i = 0; i < 2; i++) { digitalWrite(PIN_BUZZER, HIGH); delay(120);
+                                     digitalWrite(PIN_BUZZER, LOW);  delay(80); }
+        String photo = fetchPhotoB64();
+        bool ok = uploadIncident(peakKph, peakHz, hcConfirmed, photo);
+        Serial.println(ok ? "uploaded" : "UPLOAD FAILED (photo on CAM microSD)");
+      } else {
+        Serial.printf("pass: %.1f km/h (under limit)\n", peakKph);
+      }
+    }
   }
 }
 ```
 
-> **Memory note:** `StaticJsonDocument<96 * 1024>` allocates on the stack and works only because PSRAM is enabled. If you hit boot loops, switch to `JsonDocument` (ArduinoJson 7) or reduce `frame_size` to `FRAMESIZE_VGA`.
+**Design notes:**
 
-## 5. Flashing Procedure
+- **Peak-hold logic:** a car is visible to the radar for 2–3 s; each 300 ms window is a sample, and the event's recorded speed is the **peak** — matches how enforcement radar works and gives the fairest reading for a capstone evaluation.
+- **Buzzer behavior:** sounds *while* the vehicle is actively over the limit (warns the driver in real time, per the paper's intent) + a confirmation double-beep when the violation is logged.
+- **`confirmed` field:** HC-SR04 saw a solid object in the trigger zone during the event → guards against radar phantoms (branches, pedestrians). Dashboard shows it; SSU filters on it.
+- **Fail-safe:** if the CAM or WiFi is down, the CAM's microSD still holds every photo (`/capture` handler saves before serving) — pull the card during maintenance ([DEPLOYMENT.md §4](DEPLOYMENT.md#4-connectivity-failover-notes)).
+- **HB100 variant?** change one constant (`HZ_PER_KPH = 19.49`) — nothing else.
 
-1. Bench-wire per [HARDWARE.md](HARDWARE.md#1-programming-setup-temporary-on-the-bench) — including the **GPIO 0 ↔ GND jumper**.
-2. Plug in the CH340 → select its COM port (*Tools → Port*).
-3. **Upload**. If it stalls with `Connecting........_____`, the GPIO 0 jumper isn't seated or the board isn't in bootloader mode — press the ESP32-CAM's RST (IO0) button after "Connecting..." starts.
-4. After `Done uploading`, **remove the GPIO 0 jumper** and press RST.
-5. Open **Serial Monitor at 115200** — you should see the WiFi connect and `SafeWay ready`.
+---
 
-## 6. Bench Smoke Test
+## 4. Flashing Procedure
 
-1. Wave a hand through Gate A's beam, then Gate B's — Serial prints `PASS dt=... speed=... km/h`.
-2. Wave *fast* to exceed the limit → buzzer chirps, photo captures, `POST /api/incidents` returns `200` (once [BACKEND.md](BACKEND.md) is running).
-3. Confirm the SD backup: power off, pull the card, check for `/sw_*.jpg` files.
+### 4.1 Hub (38-pin board)
+1. USB cable → Tools → Board: **ESP32 Dev Module**
+2. Upload. Done — CP2102 handles reset/boot automatically.
 
-## 7. Tuning Field Values
+### 4.2 CAM board (on MB programmer)
+1. Seat the ESP32-CAM firmly on the MB board (edge connector, camera ribbon away from USB).
+2. USB cable → Tools → Board: **AI Thinker ESP32-CAM**
+3. Upload. **The MB board's auto-download circuit handles IO0** — no jumper needed. If the IDE can't find the board: hold the MB's **IO0/BOOT** button, click Upload, release when "Connecting..." appears.
+4. Serial Monitor at 115200 → note the **CAM IP address**.
 
-| Symptom | Fix |
-|---|---|
-| Speed readings erratic | Re-measure `GATE_DISTANCE_M`; re-align beams (see [HARDWARE.md](HARDWARE.md#gate-alignment-procedure)) |
-| Phantom passes (no vehicle) | Sunlight flooding the receiver — shroud it with a short black tube (film canister) |
-| Missing slow vehicles | Both beams must clear before re-arm — increase the `delay(1500)` cooldown |
-| Photos dark (night) | Add a white LED flood on the lane; the OV2640 needs light for plates |
-| Upload fails, device reboots | WiFi RSSI weak or API unreachable — check signal at the pole, add the 470 µF cap (see HARDWARE.md power notes) |
+### 4.3 Bench smoke test (before mounting anything)
+1. Hub serial shows `ACTIVE` lines when you wave a hand in front of the radar.
+2. Browser on the same WiFi: `http://<cam-ip>/stream` → live feed moves.
+3. Block/unblock the HC-SR04 with a book at ~1 m → serial distance readings sane.
+4. With the API running ([BACKEND.md](BACKEND.md)): drive a phone-flashlight "event" over the radar at speed → dashboard shows the incident with photo.
 
-Next: stand up the backend → [BACKEND.md](BACKEND.md)
+---
+
+## 5. Tuning Constants
+
+| Constant | Default | Effect |
+|---|---|---|
+| `SPEED_LIMIT_KPH` | 30 | violation threshold + buzzer trigger |
+| `HZ_PER_KPH` | 44.7 | CDM324 physics — leave unless HB100 (19.49) |
+| `COSINE_ANGLE_DEG` | 0 | set to measured mount angle to remove cosine under-read |
+| `TRIGGER_DIST_CM` | 350 | HC-SR04 "vehicle present" radius — set to pole-to-lane distance |
+| `MIN_SPEED_KPH` | 5 | noise floor; raise if tree-wobble false-triggers |
+| Window | 300 ms | shorter = faster response, noisier Hz estimate |
+| Event close | 1500 ms | silence before closing an event (lane clear) |
+
+Tuning order for the field: `MIN_SPEED_KPH` first (kill phantom triggers), then `TRIGGER_DIST_CM` (match the actual pole-to-trigger-zone distance), then `COSINE_ANGLE_DEG` from your measured install angle.
+
+---
+
+Next: the server that receives it → [BACKEND.md](BACKEND.md)
