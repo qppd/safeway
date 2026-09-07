@@ -77,6 +77,21 @@ Standard DOIT DevKit v1-compatible 38-pin board (CP2102, Type-C or micro-USB). A
 | 32/33 | spare (I2C bus) | future sensors |
 | 4/16/17/18/19/21/22/23 | spare (SPI/UART2) | future modules |
 
+**Boot & WiFi safety audit (why these exact pins):**
+
+| GPIO | Pin class on ESP32-WROOM-32 | Safe for our use? |
+|---|---|---|
+| 34 | Input-only — no strap role, no WiFi role | ✅ radar OUT drives it push-pull |
+| 26 | ADC2 channel / DAC2 | ✅ digital TRIG output only |
+| 25 | ADC2 channel / DAC1 | ✅ digital ECHO input + divider only |
+| 27 | ADC2 channel / touch T7 | ✅ digital buzzer output |
+
+- The "GPIO 25/26/27 conflict with WiFi" rule is real but applies **only to `analogRead()`** — the WiFi driver owns the ADC2 peripheral, so analog reads on those pins fail while WiFi is active. **Digital I/O and interrupts are unaffected**; this firmware never calls analog functions.
+- **Strapping pins 0, 2, 5, 12, 15 are entirely avoided** — nothing can pull the boot mode, change flash voltage (the classic GPIO-12 killer), or silence boot logs.
+- Flash pins **6–11** and UART0 **1/3** untouched.
+- **GPIO 34 has no internal pull-up/down** (true for all of 34–39): the CDM324's amplified OUT drives it push-pull so nothing is needed — but if the signal ever reads flaky, add an external **10 kΩ pull-up to 3.3 V**. Don't rely on `INPUT_PULLUP` on 34–39; it silently does nothing.
+- Interrupt load is trivial: even at 100 km/h the radar produces ~4,470 pulses/s; the ISR is a single increment.
+
 ### 2.2 ESP32-CAM-MB (camera board)
 
 AI-Thinker-style ESP32-CAM seated on the **MB programmer base board**. The MB board adds: CH340 USB-serial (flash from USB directly — no FTDI, no IO0-to-GND jumper), 5 V power jack, and reset/boot buttons that actually reach the CAM's tiny pads.
