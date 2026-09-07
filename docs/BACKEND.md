@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS incidents (
     speed_kph     REAL NOT NULL,          -- peak speed during the event
     limit_kph     REAL NOT NULL,
     doppler_hz    REAL,                   -- raw Doppler frequency at peak (audit/evidence)
-    confirmed     INTEGER DEFAULT 0,      -- 1 = HC-SR04 saw the vehicle too (radar+sonar agree)
+    confirmed     INTEGER DEFAULT 0,      -- 1 = laser break-beam broke during the event (radar+beam agree)
     photo_path    TEXT,                   -- uploads/sw_1234.jpg
     plate_text    TEXT,                   -- from recognition (nullable until processed)
     plate_confidence REAL,
@@ -57,7 +57,7 @@ CREATE INDEX IF NOT EXISTS idx_incidents_time ON incidents(detected_at DESC);
 ```
 
 - `doppler_hz` is stored so every speed reading is **auditable**: speed = doppler_hz ÷ 44.7 (÷ cosine correction). If a reading is ever disputed, the raw physics is in the record.
-- `confirmed` is the two-sensor agreement flag (radar event + HC-SR04 object present). SSU can filter to confirmed-only for reports; unconfirmed events stay for analysis.
+- `confirmed` is the two-sensor agreement flag (radar event + break-beam broken while the vehicle crossed). SSU can filter to confirmed-only for reports; unconfirmed events stay for analysis.
 - `detected_at` is stamped **server-side** on receipt (the ESP32 has no reliable clock until you add NTP — see Tuning in [FIRMWARE.md](FIRMWARE.md)).
 
 ---
@@ -76,7 +76,7 @@ Body: `application/json`
 | `speed_kph` | float | peak speed, computed on the hub |
 | `limit_kph` | float | campus limit |
 | `doppler_hz` | float | raw Doppler frequency at peak |
-| `confirmed` | bool | HC-SR04 saw a vehicle in the trigger zone during the event |
+| `confirmed` | bool | laser break-beam broke while the vehicle crossed the lane during the event |
 | `photo_b64` | string | base64 JPEG (optional — the CAM's microSD has the backup) |
 
 **201** → `{ "id": 42, "plate_text": null }`
@@ -279,7 +279,7 @@ Table of recent incidents + photo pane + **live lane feed** from the CAM + filte
       <option value="true">Reviewed</option>
     </select>
     <select id="conly" class="border rounded p-2" onchange="load()">
-      <option value="">Radar + sonar</option>
+      <option value="">Radar + beam</option>
       <option value="true">Confirmed only</option>
     </select>
     <button onclick="load()" class="bg-blue-600 text-white rounded px-4 py-2">Refresh</button>

@@ -17,7 +17,7 @@ Run in order — each gates the next. With two boards, several tests are per-boa
 | B3 | Hub boot | No boot loop; `SafeWay HUB ready` in serial monitor |
 | B4 | CAM boot | `CAM ready at http://<ip>` printed; `/capture` returns a JPEG in a browser |
 | B5 | Live stream | `/stream` animates in a browser on the same WiFi |
-| B6 | HC-SR04 sanity | Wall distance reading within ±3 cm at 1–2 m (serial) |
+| B6 | Break-beam sanity | Block the beam with a book at ~1 m → hub prints `BEAM BROKEN`; remove → intact; boot line shows beam state |
 | B7 | Buzzer | Sounds while speed > limit during an event; silent otherwise |
 | B8 | WiFi + API | `POST /api/incidents` returns 201 on a simulated violation |
 | B9 | SD backup | Photo exists on the CAM's microSD after an event, even with the API down |
@@ -141,7 +141,7 @@ Longest outage: ____ min   SD photos present: Y/N   CAM power-cycle recovery: Y/
 | Serial shows Hz but speed ~½ expected | Radar variant IF scaling differs | Re-verify §3; recalibrate `HZ_PER_KPH`, document |
 | Constant −5–10% on everything | Cosine error from mount angle | Measure angle; set `COSINE_ANGLE_DEG` |
 | Phantom events with no vehicle | Branches/banners in beam cone; `MIN_SPEED_KPH` too low | Clear the beam corridor; raise the noise floor |
-| `confirmed` never true | HC-SR04 aimed wrong / ECHO divider missing / `TRIGGER_DIST_CM` too small | Re-aim at trigger zone; check §5.2 divider; widen radius |
+| `confirmed` never true | Beam mis-aimed / DO divider missing / `BEAM_BREAKS_LOW` polarity wrong | Re-align far post; check §5.2 level; flip the polarity constant |
 | Hub can't fetch photo | CAM IP changed (DHCP) | Set DHCP reservation; update `CAM_IP` |
 | Photos dark/blurry at night | OV2640 gain maxed, plate unreadable | Add lane lighting (Optimize phase); OCR retries nightly |
 | OCR < 50% accuracy | Photo angle/distance wrong for plate size | Camera closer to plate height; capture at trigger zone |

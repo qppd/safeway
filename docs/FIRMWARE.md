@@ -7,7 +7,7 @@ Two independent sketches, one per board. Each flashes over its own USB port.
 | Sketch | Board | Job |
 |---|---|---|
 | `safeway-cam` | ESP32-CAM-MB | photo server: `/capture` (JPEG) + `/stream` (live MJPEG) + SD backup |
-| `safeway-hub` | ESP32 38-pin | Doppler speed + HC-SR04 confirm + buzzer + fetch photo + upload to API |
+| `safeway-hub` | ESP32 38-pin | Doppler speed + break-beam confirm + buzzer + fetch photo + upload to API |
 
 ---
 
@@ -153,11 +153,11 @@ void loop() {
 
 ## 3. Sketch 2 — `safeway-hub` (38-pin sensor board)
 
-The brain: counts Doppler pulses, converts Hz→km/h, confirms with HC-SR04, buzzes on overspeed, fetches the photo from the CAM, uploads the incident.
+The brain: counts Doppler pulses, converts Hz→km/h, confirms with the laser break-beam, buzzes on overspeed, fetches the photo from the CAM, uploads the incident.
 
 ```cpp
 /* safeway-hub — ESP32 38-pin (sensor hub)
-   GPIO 34 = CDM324 OUT | GPIO 26/25 = HC-SR04 TRIG/ECHO | GPIO 27 = buzzer */
+   GPIO 34 = CDM324 OUT | GPIO 25 = laser receiver DO | GPIO 27 = buzzer */
 
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -174,28 +174,34 @@ const float HZ_PER_KPH = 44.7;              // CDM324 @ 24.125 GHz
 const float COSINE_ANGLE_DEG = 0.0;         // set if mounted off-axis (see HARDWARE §8)
 const float SPEED_LIMIT_KPH  = 30.0;         // campus limit
 const float MIN_SPEED_KPH   = 5.0;          // below this = noise, ignore
-const float TRIGGER_DIST_CM  = 350.0;        // HC-SR04: "vehicle is HERE" distance
+const bool  BEAM_BREAKS_LOW = true;         // true: DO LOW = beam intact (most modules)
+                                            // set from the bench polarity check (HARDWARE §5.2)
 // ----------------------------
 
 #define PIN_RADAR   34
-#define PIN_TRIG    26
-#define PIN_ECHO    25
+#define PIN_BEAM     25
 #define PIN_BUZZER   27
 
 volatile uint32_t pulses = 0;
 IRAM_ATTR void onPulse() { pulses++; }
 
-uint32_t readHCSR04_cm() {                  // blocking ~30 ms max
-  digitalWrite(PIN_TRIG, LOW);  delayMicroseconds(2);
-  digitalWrite(PIN_TRIG, HIGH); delayMicroseconds(10);
-  digitalWrite(PIN_TRIG, LOW);
-  uint32_t us = pulseIn(PIN_ECHO, HIGH, 30000);
-  return us / 58;                           // us -> cm
+// --- laser break-beam: interrupt + software debounce ---
+volatile uint32_t beamEdgeMs = 0;           // last accepted edge time (ms)
+volatile bool beamBroken = false;           // true = vehicle (or object) blocking beam
+IRAM_ATTR void onBeamEdge() {
+  uint32_t now = millis();
+  if (now - beamEdgeMs < 50) return;        // debounce: ignore edges <50 ms apart
+  beamEdgeMs = now;
+  bool level = digitalRead(PIN_BEAM);        // read level at the edge
+  // If DO LOW = beam intact (BEAM_BREAKS_LOW true), a rising edge = beam broken;
+  // falling edge = beam restored.
+  bool broken = BEAM_BREAKS_LOW ? (level == HIGH) : (level == LOW);
+  beamBroken = broken;
 }
 
 float lastKph = 0, peakKph = 0, peakHz = 0;
-uint32_t winStart = 0, lastActiveMs = 0;
-bool inEvent = false, hcConfirmed = false;
+uint32_t winStart = 0, lastActiveMs = 0, beamBrokenMs = 0;
+bool inEvent = false, beamConfirmed = false;
 
 float kphFromHz(float hz) {
   float measured = hz / HZ_PER_KPH;
@@ -237,12 +243,18 @@ String fetchPhotoB64() {                    // GET /capture from the CAM
 void setup() {
   Serial.begin(115200);
   pinMode(PIN_RADAR, INPUT);
-  pinMode(PIN_TRIG, OUTPUT); pinMode(PIN_ECHO, INPUT);
+  pinMode(PIN_BEAM, INPUT_PULLUP);           // receiver comparator DO (GPIO 25 has pull-ups)
   pinMode(PIN_BUZZER, OUTPUT); digitalWrite(PIN_BUZZER, LOW);
   attachInterrupt(digitalPinToInterrupt(PIN_RADAR), onPulse, RISING);
+  attachInterrupt(digitalPinToInterrupt(PIN_BEAM), onBeamEdge, CHANGE);
+  // initial beam state (no edge has fired yet)
+  delay(100);                                // let the receiver settle
+  bool lvl = digitalRead(PIN_BEAM);
+  beamBroken = BEAM_BREAKS_LOW ? (lvl == HIGH) : (lvl == LOW);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   while (WiFi.status() != WL_CONNECTED) { delay(200); Serial.print("."); }
   Serial.println("\nSafeWay HUB ready");
+  Serial.printf("beam state at boot: %s\n", beamBroken ? "BROKEN (check alignment)" : "intact");
 }
 
 void loop() {
@@ -258,19 +270,22 @@ void loop() {
 
   // --- event state machine ---
   if (kph >= MIN_SPEED_KPH) {
-    if (!inEvent) { inEvent = true; peakKph = 0; peakHz = 0; hcConfirmed = false; }
+    if (!inEvent) { inEvent = true; peakKph = 0; peakHz = 0; beamConfirmed = false; }
     if (kph > peakKph) { peakKph = kph; peakHz = hz; }
     lastActiveMs = millis();
 
-    // HC-SR04: is a vehicle physically in the trigger zone?
-    uint32_t dist = readHCSR04_cm();
-    if (dist > 1 && dist < TRIGGER_DIST_CM) hcConfirmed = true;
+    // laser break-beam: did a solid object cross the lane during the event?
+    if (beamBroken) {
+      beamConfirmed = true;
+      beamBrokenMs = millis();
+      Serial.println("BEAM BROKEN");
+    }
 
     // buzzer: live warn while actively speeding
     digitalWrite(PIN_BUZZER, kph > SPEED_LIMIT_KPH ? HIGH : LOW);
 
-    if (kph > SPEED_LIMIT_KPH) Serial.printf("ACTIVE %.1f km/h (%.0f Hz) d=%u cm\n",
-                                             kph, hz, dist);
+    if (kph > SPEED_LIMIT_KPH) Serial.printf("ACTIVE %.1f km/h (%.0f Hz) beam=%s\n",
+                                             kph, hz, beamBroken ? "broken" : "intact");
   }
   else if (inEvent) {
     digitalWrite(PIN_BUZZER, LOW);
@@ -278,12 +293,12 @@ void loop() {
       inEvent = false;
       if (peakKph > SPEED_LIMIT_KPH) {       // VIOLATION
         Serial.printf("VIOLATION peak %.1f km/h | confirmed=%s\n",
-                      peakKph, hcConfirmed ? "yes" : "no");
+                      peakKph, beamConfirmed ? "yes" : "no");
         // confirm beep
         for (int i = 0; i < 2; i++) { digitalWrite(PIN_BUZZER, HIGH); delay(120);
                                      digitalWrite(PIN_BUZZER, LOW);  delay(80); }
         String photo = fetchPhotoB64();
-        bool ok = uploadIncident(peakKph, peakHz, hcConfirmed, photo);
+        bool ok = uploadIncident(peakKph, peakHz, beamConfirmed, photo);
         Serial.println(ok ? "uploaded" : "UPLOAD FAILED (photo on CAM microSD)");
       } else {
         Serial.printf("pass: %.1f km/h (under limit)\n", peakKph);
@@ -297,7 +312,7 @@ void loop() {
 
 - **Peak-hold logic:** a car is visible to the radar for 2–3 s; each 300 ms window is a sample, and the event's recorded speed is the **peak** — matches how enforcement radar works and gives the fairest reading for a capstone evaluation.
 - **Buzzer behavior:** sounds *while* the vehicle is actively over the limit (warns the driver in real time, per the paper's intent) + a confirmation double-beep when the violation is logged.
-- **`confirmed` field:** HC-SR04 saw a solid object in the trigger zone during the event → guards against radar phantoms (branches, pedestrians). Dashboard shows it; SSU filters on it.
+- **`confirmed` field:** the break-beam broke during the radar event → a solid object physically crossed the lane → guards against radar phantoms (branches, pedestrians). Dashboard shows it; SSU filters on it.
 - **Fail-safe:** if the CAM or WiFi is down, the CAM's microSD still holds every photo (`/capture` handler saves before serving) — pull the card during maintenance ([DEPLOYMENT.md §4](DEPLOYMENT.md#4-connectivity-failover-notes)).
 - **HB100 variant?** change one constant (`HZ_PER_KPH = 19.49`) — nothing else.
 
@@ -318,7 +333,7 @@ void loop() {
 ### 4.3 Bench smoke test (before mounting anything)
 1. Hub serial shows `ACTIVE` lines when you wave a hand in front of the radar.
 2. Browser on the same WiFi: `http://<cam-ip>/stream` → live feed moves.
-3. Block/unblock the HC-SR04 with a book at ~1 m → serial distance readings sane.
+3. Block/unblock the laser beam with a book at ~1 m → hub prints `BEAM BROKEN`, boot message shows beam state.
 4. With the API running ([BACKEND.md](BACKEND.md)): drive a phone-flashlight "event" over the radar at speed → dashboard shows the incident with photo.
 
 ---
@@ -330,12 +345,12 @@ void loop() {
 | `SPEED_LIMIT_KPH` | 30 | violation threshold + buzzer trigger |
 | `HZ_PER_KPH` | 44.7 | CDM324 physics — leave unless HB100 (19.49) |
 | `COSINE_ANGLE_DEG` | 0 | set to measured mount angle to remove cosine under-read |
-| `TRIGGER_DIST_CM` | 350 | HC-SR04 "vehicle present" radius — set to pole-to-lane distance |
+| `BEAM_BREAKS_LOW` | true | beam polarity — set from the §5.2 bench check (`true` = DO LOW means beam intact, most modules) |
 | `MIN_SPEED_KPH` | 5 | noise floor; raise if tree-wobble false-triggers |
 | Window | 300 ms | shorter = faster response, noisier Hz estimate |
 | Event close | 1500 ms | silence before closing an event (lane clear) |
 
-Tuning order for the field: `MIN_SPEED_KPH` first (kill phantom triggers), then `TRIGGER_DIST_CM` (match the actual pole-to-trigger-zone distance), then `COSINE_ANGLE_DEG` from your measured install angle.
+Tuning order for the field: `MIN_SPEED_KPH` first (kill phantom triggers), then `BEAM_BREAKS_LOW` from the bench polarity check, then `COSINE_ANGLE_DEG` from your measured install angle.
 
 ---
 

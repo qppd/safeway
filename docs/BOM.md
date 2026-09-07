@@ -1,7 +1,7 @@
 # SafeWay — Bill of Materials (BOM)
 
-**Project:** IoT Vehicle Speed Monitoring System (CDM324 24 GHz Doppler radar + two-board ESP32 architecture)
-**Source:** Lazada Philippines · Prices checked **Sep 7, 2026**
+**Project:** IoT Vehicle Speed Monitoring System (CDM324 24 GHz Doppler radar + laser break-beam confirm + two-board ESP32 architecture)
+**Source:** Lazada Philippines · Prices checked **Sep 7–8, 2026**
 **Criteria:** 3+ rating where available, proven sales (sold count), local PH sellers preferred, cheapest that qualifies.
 **Note:** Lazada prices move with vouchers/promos — treat totals as estimates (±10%).
 
@@ -12,7 +12,7 @@
 ```
   ┌─ ESP32 38-pin HUB (sensor board) ──────────────────┐
   │  CDM324 radar OUT ──► GPIO (Doppler pulse counting) │
-  │  HC-SR04 ultrasonic ──► GPIO (redundant detection)  │
+  │  Laser receiver DO ──► GPIO 25 (presence confirm)   │
   │  Buzzer ──► GPIO (overspeed alert)                   │
   │  WiFi: fetches photo from CAM, POSTs to cloud API    │
   └──────────────┬──────────────────────────────────────┘
@@ -22,9 +22,15 @@
   │  microSD: local backup of every violation photo      │
   │  MB programmer board: CH340 = easy USB flashing      │
   └─────────────────────────────────────────────────────┘
+
+  ┌─ FAR POST (opposite side of the lane) ─────────────┐
+  │  KY-008 laser TX, always-on (S strapped to VCC)     │
+  │  powered by a 2-wire 22AWG run from the hub box     │
+  │  red dot crosses the lane to the receiver           │
+  └─────────────────────────────────────────────────────┘
 ```
 
-**Why two boards:** the classic AI-Thinker ESP32-CAM starves you for pins (camera + SD leaves ~2–3 usable GPIOs — no room for radar, ultrasonic, and buzzer). Splitting duties gives the sensors a full 38-pin board and the camera a dedicated board — each simpler to code, flash, and debug. They meet over WiFi; no wires between them.
+**Why two boards:** the classic AI-Thinker ESP32-CAM starves you for pins (camera + SD leaves ~2–3 usable GPIOs — no room for radar, beam receiver, and buzzer). Splitting duties gives the sensors a full 38-pin board and the camera a dedicated board — each simpler to code, flash, and debug. They meet over WiFi; no wires between them (the far-post laser TX is the only cable in the system — two thin wires).
 
 ---
 
@@ -35,7 +41,7 @@
 | 1 | CDM324 24 GHz Doppler radar module (E-WOITD) | 1 | ₱184 | ₱184 | LazMall, 93% seller | — |
 | 2 | ESP32-CAM + MB programmer board (bundle) | 1 | ₱498 | ₱498 | new listing | — |
 | 3 | ESP32 38-pin dev board, CP2102, Type-C (DIYUSER) | 1 | ₱196 | ₱196 | 4.8★ (81) | 822 |
-| 4 | HC-SR04 ultrasonic sensor | 1 | ₱45 | ₱45 | 4.9 (989) | 7.7K |
+| 4 | KY-008 laser transmitter + laser receiver module pair (Layad Circuits) | 1 pair | ₱253 | ₱253 | 97% seller · 4.7K sold store | — |
 | 5 | LM358 dual op-amp DIP-8 (2 pcs, fallback conditioner) | 1 pack | ₱25 | ₱25 | — | 370 |
 | 6 | Active buzzer 5V | 1 | ₱30 | ₱30 | 5.0 (42) | 174 |
 | 7 | Kingston microSD 16GB Class 10 | 1 | ₱219 | ₱219 | 4.8 (265) | 1.0K |
@@ -43,9 +49,10 @@
 | 9 | Breadboard 830 points (SYB MB-102) | 1 | ₱29 | ₱29 | 4.8 (1,959) | 15.0K |
 | 10 | 5V 2A power adapter (DC jack) | 2 | ₱53 | ₱106 | 4.9 (324) | 4.5K |
 | 11 | Weatherproof enclosure IP68 ABS (ALLAN 200×100×70) | 1 | ₱220 | ₱220 | 4.9 (1,545) | 14.5K |
-| 12 | Zip ties 100pcs (mounting) | 1 | ₱12 | ₱12 | — | 153.8K |
+| 12 | 2-core 22AWG cable 10 m (far-post laser run) | 1 | ₱51 | ₱51 | — | — |
+| 13 | Zip ties 100pcs (mounting) | 1 | ₱12 | ₱12 | — | 153.8K |
 
-**GRAND TOTAL (recommended build): ≈ ₱1,642**
+**GRAND TOTAL (recommended build): ≈ ₱1,901**
 
 ---
 
@@ -61,7 +68,7 @@ The E-WOITD module sold on Lazada PH is the ICStation-style board with onboard t
 
 **Range:** roughly 10–30 m on a car-sized target (module gain dependent). More than enough for a campus lane.
 
-> **Note on the paper:** the reference study (safeway.pdf) specced **IR break-beam sensors** for speed and an HC-SR04 as "supplementary detection (optional redundancy)". This build keeps the HC-SR04 in that redundancy role (cheap, proven, same purpose) but **replaces the two IR break-beams with one CDM324 radar** — direct speed measurement, no cross-road posts, no sun-blind receivers, no beam alignment, and better accuracy on multi-lane or partial crossings.
+> **Note on the paper:** the reference study (safeway.pdf) specced **two IR break-beam sensors** for speed and an HC-SR04 as "supplementary detection (optional redundancy)". This build replaces all of them: the **CDM324 radar** takes over speed measurement (direct, physics-exact, no sun-blind receivers, no beam alignment, better multi-lane behavior), and a **KY-008 laser break-beam pair** takes over presence confirmation — same break-beam principle as the paper's IR gates but at visible 650 nm with a photoresistor-based receiver module, so it isn't fooled by sunlight the way raw IR photodiodes are, and it spans the lane on a cheap 2-wire run. The HC-SR04 is dropped entirely (no ultrasonic in this build).
 
 ---
 
@@ -92,12 +99,14 @@ The E-WOITD module sold on Lazada PH is the ICStation-style board with onboard t
 - **Backup 2 (local, Bulacan):** PowerMav ESP32 38-pin Type-C ₱233 — search "ESP32 38 Pin Module Type C" on Lazada
 - **Why not an ESP32-S3 board:** the S3 variant costs ₱391+ and its camera pins aren't relevant here (no camera on this board); the WROOM-32 is ₱196, runs the same Arduino core, and has more free pins than the project needs.
 
-### 4. HC-SR04 Ultrasonic Sensor (redundant detection)
-- **Price:** ₱45.00 · **Rating:** 4.9 (989) · **Sold:** 7.7K · **Location:** Bulacan
-- **URL:** https://www.lazada.com.ph/products/pdp-i123573087.html
-- Note: kept from the paper's BOM (item #4, ₱80) — "supplementary vehicle detection (optional redundancy)". Here it watches the trigger zone directly in front of the pole: when distance suddenly drops (car in the near zone), it confirms a vehicle is physically present, guarding against radar phantom triggers (swaying branches, pedestrians, small animals). See [HARDWARE.md §7–8](HARDWARE.md#7-enclosure-assembly-ip68-abs-200x100x70-mm).
- If only far lane activity matters, drop it and save ₱45.
-- **Backup:** Circuitrocks HC-SR04 ₱35 (64 ratings) — same search page.
+### 4. KY-008 Laser Transmitter + Laser Receiver Module Pair (presence confirmation)
+- **Price:** ₱253.00 (pair — select the "Transmitter&Receiver" variant) · **Seller:** Layad Circuits (Benguet) · **Seller rating:** 97% · 4.7K sold by store · 5-year store, 100% ships in 48 h
+- **URL:** https://www.lazada.com.ph/products/pdp-i5141273577.html
+- **Backup (TX only):** KY-008 module from Fulabs ₱44 — https://www.lazada.com.ph/products/pdp-i5367051449.html (pair it with a separate laser-receiver module; e.g. "Laser Receiver Sensor" ₱165, Laguna — https://www.lazada.com.ph/products/pdp-i4352848577.html)
+- **Backup 2 (kit):** "KY-008 Laser Transmitter + Non-Modulator Laser Receiver Module Kit" ₱626 — https://www.lazada.com.ph/products/pdp-i15568605059.html
+- Role: **KY-008 TX** sits on the far post (650 nm red laser, ~5 mW, always-on); the **receiver module** (photodiode/photoresistor front-end, comparator with digital DO output) sits on the hub pole. A vehicle crossing the lane breaks the beam → DO changes state → hub flags "vehicle physically present" to confirm the radar event. This replaces the paper's IR break-beam concept with a visible-light version that resists sunlight interference.
+- KY-008 pinout: **S = signal** (tie to 5 V for always-on — simplest), **middle = +5 V**, **− = GND**. Draws < 30 mA.
+- **Safety note:** 5 mW / 650 nm is Class 3R-adjacent — never look into the beam, don't aim at eye level of drivers/pedestrians; mount it low (plate height) and aim it across the lane at the receiver, not along it.
 
 ### 5. LM358 Dual Op-Amp DIP-8 (2 pcs) — signal conditioning fallback
 - **Price:** ₱25.00 (2 pieces) · **Sold:** 370 · **Location:** Bulacan
@@ -130,7 +139,7 @@ The E-WOITD module sold on Lazada PH is the ICStation-style board with onboard t
 ### 10. 5V 2A Power Supply Adapter (DC 5.5×2.5mm jack)
 - **Price:** ₱53.00 each, **2 pcs budgeted** · **Sold:** 4.5K · **Rating:** 4.9 (324) · **Location:** Bulacan
 - **URL:** https://www.lazada.com.ph/products/pdp-i3062233761.html
-- Note: one adapter powers the 38-pin hub (radar + HC-SR04 + buzzer), one powers the CAM-MB board. WiFi bursts + camera draw peaks; separate adapters mean a camera reboot can't brown-out the radar mid-measurement.
+- Note: one adapter powers the 38-pin hub (radar + beam receiver + buzzer **and the far-post KY-008 TX over the 22AWG run** — it draws < 30 mA, negligible), one powers the CAM-MB board. WiFi bursts + camera draw peaks; separate adapters mean a camera reboot can't brown-out the radar mid-measurement.
 - **Backup:** ₱55, 5.5K sold — https://www.lazada.com.ph/products/pdp-i2442570467.html
 
 ### 11. Weatherproof Enclosure — ALLAN IP68 ABS Junction Box
@@ -140,7 +149,13 @@ The E-WOITD module sold on Lazada PH is the ICStation-style board with onboard t
 - Note: 200×100×70 fits the 830-point breadboard + 38-pin board + CAM-MB + radar wiring. **24 GHz passes through ABS plastic** — radar can sit behind a plain plastic wall (no metal!). The CAM needs a window — see [HARDWARE.md §7](HARDWARE.md#7-enclosure-assembly-ip68-abs-200x100x70-mm).
 - **Budget alt:** IP65 ABS box ₱27.50 — https://www.lazada.com.ph/products/pdp-i5215693124.html (light rain only)
 
-### 12. Cable/Zip Ties 100pcs (mounting + cable management)
+### 12. 2-Core 22AWG Cable 10 m (far-post laser run)
+- **Price:** ₱50.51 (10 m roll, red/black) · **Location:** Bulacan (local express)
+- **URL:** https://www.lazada.com.ph/products/pdp-i5407853518.html
+- Role: powers the far-post KY-008 transmitter (5 V + GND) from the hub enclosure. 22AWG copper at < 30 mA has millivolts of drop even at 10 m — the laser runs at full brightness. Run it along the ground/curb (UV-rated ties, buried conduit sleeve if possible) — it is the system's only cable.
+- **Backup:** JCSYFAC same-spec ₱59.38 — https://www.lazada.com.ph/products/pdp-i15496940788.html
+
+### 13. Cable/Zip Ties 100pcs (mounting + cable management)
 - **Price:** ₱12.00 · **Sold:** 40K+ · **Location:** Bulacan
 - **URL:** https://www.lazada.com.ph/products/pdp-i7109771.html *(or search "zip ties 100pcs")*
 
@@ -150,8 +165,9 @@ The E-WOITD module sold on Lazada PH is the ICStation-style board with onboard t
 
 | Build | What changes | Total |
 |---|---|---:|
-| **Recommended** (as above) | — | **≈ ₱1,642** |
-| **Bare-bones bench POC** | IP65 box (−₱192); one adapter powering both boards + rail cap (−₱53); skip zip ties (−₱12); one jumper set (−₱39) | ≈ ₱1,346 |
-| **Deluxe** | Prebuilt LM358 amp module instead of ICs (+₱123); HC-SR04 holder (+₱32) | ≈ ₱1,797 |
+| **Recommended** (as above) | — | **≈ ₱1,901** |
+| **Bare-bones bench POC** | IP65 box (−₱192); one adapter powering both boards + rail cap (−₱53); skip zip ties (−₱12); one jumper set (−₱39) | ≈ ₱1,605 |
+| **Deluxe** | Prebuilt LM358 amp module instead of ICs (+₱123); small IP65 box (e.g. ₱60) on the far post for the laser TX (+₱60) | ≈ ₱2,084 |
+| **No far post available?** | Skip the cross-lane beam (−₱253 −₱51) and run radar-only with `MIN_SPEED_KPH` raised — records stay but lose the two-sensor confirm flag | ≈ ₱1,597 |
 
-Parts verified Sep 6–7, 2026. Re-check prices before ordering — Lazada promo pricing moves daily.
+Parts verified Sep 6–8, 2026. Re-check prices before ordering — Lazada promo pricing moves daily.

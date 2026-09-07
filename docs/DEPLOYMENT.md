@@ -21,12 +21,12 @@ Criteria for the pilot lane — walk candidates with SSU:
 | Safety | Lane remains passable; nothing overhanging traffic | Duh |
 | SSU visibility | Near a guard post / patrol route | Physical deterrence + maintenance access |
 
-**Record on the survey sheet:** pole GPS/ID, measured pole-to-lane distance (sets `TRIGGER_DIST_CM`), measured radar mount angle (sets `COSINE_ANGLE_DEG`), power outlet location, WiFi SSID + signal, photo of the site from both directions.
+**Record on the survey sheet:** pole GPS/ID, lane width at the crossing point (sets the far-post distance + 22AWG run length), measured radar mount angle (sets `COSINE_ANGLE_DEG`), far-post footing option (existing post/tree/fence vs. new PVC), power outlet location, WiFi SSID + signal, photo of the site from both directions.
 
 ## 2. Pre-Install Checklist
 
 - [ ] Bench + calibration tests passed ([TESTING.md](TESTING.md))
-- [ ] `TRIGGER_DIST_CM` updated to the *site* pole-to-trigger-zone measurement
+- [ ] `BEAM_BREAKS_LOW` polarity verified on the bench (receiver DO level, beam intact vs blocked)
 - [ ] `COSINE_ANGLE_DEG` set from the *site* mount angle (or kept 0 if aimed near-parallel)
 - [ ] WiFi credentials for the campus SSID configured (2.4 GHz!)
 - [ ] `API_URL` points at the production server; `CAM_IP` matches the CAM's **DHCP reservation**
@@ -42,7 +42,7 @@ Criteria for the pilot lane — walk candidates with SSU:
 
 1. Mount the enclosure on the pole at **1–1.5 m**, camera facing the trigger zone at plate height.
 2. **Radar aim:** beam along the traffic direction, **≤15° off the lane axis** — the sweet spot is 10–15°. A protractor app on your phone against the box edge works.
-3. **HC-SR04 aim:** transducer barrels through their sealed cutouts, pointed at the **trigger zone** (the road point nearest the pole).
+3. **Break-beam alignment (one-time, two-person):** far-post KY-008 dot aimed at the receiver window on the hub enclosure — one person watches the receiver LED / hub serial `BEAM` state, the other nudges the far post until beam reads **intact**. Re-check after typhoons (a knocked far post is the #1 beam failure mode).
 4. Power: adapters inside a small weatherproof junction box at the outlet; DC runs up to the enclosure; drip loops at every entry.
 5. UV-rated cable ties on all runs; check nothing metallic sits between radar face and road.
 
@@ -51,7 +51,7 @@ Criteria for the pilot lane — walk candidates with SSU:
 1. Power up → serial (laptop at the pole) shows WiFi + `SafeWay HUB ready` + `CAM ready`.
 2. Browser check: `/stream` live from a phone on campus WiFi.
 3. Marshal 3–5 drive-pasts at mixed speeds → all appear on dashboard with photos + live feed works.
-4. Verify `confirmed=✓` on at least one drive-past (HC-SR04 agreeing with radar).
+4. Verify `confirmed=✓` on at least one drive-past (break-beam agreeing with radar).
 5. Physically tug-test every mount and cable.
 6. Photograph the finished install for the paper's Figure 8 (prototype deployed).
 
@@ -81,14 +81,14 @@ Leave printed copies: this guide's §5–7, the dashboard URL, and the fault tab
 |---|---|
 | Weekly | Pull CAM microSD (or spot check), verify photos exist for the week's dashboard records |
 | Weekly | Visual: enclosure seals, cable ties, camera window |
-| Monthly | Clean camera window + HC-SR04 barrels + radar-facing ABS wall (outside face); check desiccant |
+| Monthly | Clean camera window + receiver window + radar-facing ABS wall (outside face); check desiccant |
 | Monthly | Backup `safeway.db` + `uploads/` off the server |
 | Quarterly | Re-run the 10-pass calibration ([TESTING.md §2](TESTING.md#2-speed-calibration-the-critical-test)) at the site; re-check radar aim angle + re-torque mounts |
 | Yearly | Battery-free devices — but plan adapter/cable replacement every 2 typhoon seasons |
 
 ### Typhoon season prep
 
-Take-down criteria (SSU decides): storm signal #2 or expected gusts > 60 km/h → unpower, unbolt the box, bring it indoors. One box, two adapters, four screws — **10-minute teardown** (the radar design removed the gate posts that used to double the work).
+Take-down criteria (SSU decides): storm signal #2 or expected gusts > 60 km/h → unpower, unbolt the box, bring it indoors. One box, two adapters, four screws — **10-minute teardown** (unclip the 22AWG pair at the far post and coil it with the box; the far-post KY-008 stays capped until re-install).
 
 ## 7. Fault Symptoms → Actions (leave with SSU)
 
@@ -97,7 +97,7 @@ Take-down criteria (SSU decides): storm signal #2 or expected gusts > 60 km/h �
 | Buzzer silent on a fast vehicle | Radar face blocked? (dirt, stickers, bird nest on the box) | Clean wall; IT ticket — check hub serial |
 | Live feed grayed out | CAM rebooted — give it 60 s | IT ticket — power-cycle CAM adapter |
 | Dashboard no new records, buzzer works | WiFi down at the pole (phone test) | IT ticket — network team |
-| Records but `confirmed` always — | HC-SR04 cutouts dirty/mis-aimed | Re-aim at trigger zone (§3.1) |
+| Records but `confirmed` always — | Receiver window dirty / far post knocked (beam permanently broken or mis-aimed) | Clean window; re-align far post (§3.1); check `BEAM_BREAKS_LOW` polarity |
 | Photos dark/blurry at night | Confirm lane light is on | Add lighting (capstone Optimize phase) |
 | Plate column empty | Photo angle changed? | Re-run camera aim (§3.1) — OCR retries nightly |
 | Speeds look wrong (low) | Pole knocked to a steeper angle? | Re-measure angle; update `COSINE_ANGLE_DEG` |

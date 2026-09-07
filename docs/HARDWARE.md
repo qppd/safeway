@@ -18,26 +18,25 @@ Wiring, power, and enclosure build for the SafeWay prototype (two-board architec
 
 ## 1. System Overview
 
-A single pole-mounted unit watches the lane. The **CDM324 24 GHz Doppler radar** measures vehicle speed directly from the Doppler frequency shift; the **ESP32-CAM** (on its MB programmer board) photographs the vehicle and serves a live stream; the **ESP32 38-pin hub** counts Doppler pulses, checks the HC-SR04, sounds the buzzer on overspeed, fetches the photo from the CAM, and logs the incident to the cloud API. No cross-road wiring, no second post, no beam alignment.
+A single pole-mounted unit watches the lane. The **CDM324 24 GHz Doppler radar** measures vehicle speed directly from the Doppler frequency shift; the **ESP32-CAM** (on its MB programmer board) photographs the vehicle and serves a live stream; the **ESP32 38-pin hub** counts Doppler pulses, watches the **laser break-beam** (KY-008 transmitter on a far post, receiver module on the hub pole — a vehicle crossing the lane breaks the beam), sounds the buzzer on overspeed, fetches the photo from the CAM, and logs the incident to the cloud API. No data cables across the road — just one thin 2-wire power run to the far-post laser.
 
 ```
         Road lane  ────────────────────► direction of travel
                       (10–30 m radar coverage)
 
-  ┌ SINGLE POLE UNIT (one IP68 enclosure) ────────────┐
-  │                                                    │
-  │  ESP32 38-pin HUB                                  │
-  │   ├── CDM324 radar OUT ── GPIO 34  (pulse counting)│
-  │   ├── HC-SR04 TRIG/ECHO ── GPIO 26/25              │
-  │   ├── Buzzer ── GPIO 27                             │
-  │   └── WiFi ── fetches CAM photo, POSTs to API       │
-  │                                                    │
-  │  ESP32-CAM-MB (camera board)                        │
-  │   ├── OV2640 /capture  (violation snapshot)         │
-  │   ├── /stream  (MJPEG live feed for dashboard)      │
-  │   └── microSD: local backup of every photo          │
-  │                                                    │
-  └────────────────────┬───────────────────────────────┘
+   FAR POST                      HUB POLE
+  ┌ KY-008 laser TX ─────╳╳╳╳╳──── laser receiver ─┐
+  │ (red dot, always-on)  beam        (module, DO) │
+  │ powered by 22AWG 2-wire run ────► ESP32 38-pin HUB
+  │                                     ├── CDM324 radar OUT ── GPIO 34
+  │                                     ├── Laser receiver DO ── GPIO 25
+  │                                     ├── Buzzer ── GPIO 27
+  │                                     └── WiFi ── fetches CAM photo, POSTs to API
+  │                                     ESP32-CAM-MB
+  │                                     ├── OV2640 /capture  (violation snapshot)
+  │                                     ├── /stream  (MJPEG live feed for dashboard)
+  │                                     └── microSD: local backup of every photo
+  └────────────────────┬────────────────────────────────┘
                        │ campus WiFi
                        ▼
                   Cloud API + Dashboard
@@ -51,7 +50,7 @@ f_doppler (Hz) = 44.7 × speed (km/h)
 
 A car at 30 km/h → ~1,341 Hz on the OUT pin. The hub counts pulses over a window and divides — that's the whole speed measurement chain.
 
-**Why two boards:** the classic single-board ESP32-CAM starves pins (camera + SD leaves ~2 usable GPIOs — no room for radar, ultrasonic, buzzer). Splitting duties gives the sensors a full 38-pin board and the camera a dedicated board — each simpler to code, flash, and debug; and a camera reboot (heap fragmentation etc.) can never disturb a speed measurement in progress.
+**Why two boards:** the classic single-board ESP32-CAM starves pins (camera + SD leaves ~2 usable GPIOs — no room for radar, break-beam, buzzer). Splitting duties gives the sensors a full 38-pin board and the camera a dedicated board — each simpler to code, flash, and debug; and a camera reboot (heap fragmentation etc.) can never disturb a speed measurement in progress.
 
 ---
 
@@ -59,7 +58,7 @@ A car at 30 km/h → ~1,341 Hz on the OUT pin. The hub counts pulses over a wind
 
 ### 2.1 ESP32 38-pin (sensor hub)
 
-Standard DOIT DevKit v1-compatible 38-pin board (CP2102, Type-C or micro-USB). All its GPIOs are free — no camera driver hogging them. SafeWay uses just 3 GPIOs (radar, HC-SR04 ×2 pins, buzzer), leaving 30+ spare for future sensors (PIR, RGB status LED, rain gauge…).
+Standard DOIT DevKit v1-compatible 38-pin board (CP2102, Type-C or micro-USB). All its GPIOs are free — no camera driver hogging them. SafeWay uses just 3 GPIOs (radar, beam receiver, buzzer), leaving 30+ spare for future sensors (PIR, RGB status LED, rain gauge…).
 
 **Board quirks to know:**
 - GPIO 34/35/36/39 are **input-only** — perfect for the radar OUT (never needs to drive).
@@ -71,26 +70,25 @@ Standard DOIT DevKit v1-compatible 38-pin board (CP2102, Type-C or micro-USB). A
 | GPIO | SafeWay assignment | Notes |
 |---|---|---|
 | **34** (input-only) | **CDM324 OUT** — Doppler pulses | Input-only pin: the radar only ever drives it; ideal |
-| **26** | HC-SR04 TRIG | any OUTPUT-capable GPIO |
-| **25** | HC-SR04 ECHO | level-shifted 5 V→3.3 V? see §5.2 note |
+| **25** | **Laser receiver DO** (beam broken/OK) | digital in; receiver is a 3.3 V-safe comparator output — see §5.2 note |
 | **27** | Buzzer + | any OUTPUT-capable GPIO |
 | 32/33 | spare (I2C bus) | future sensors |
-| 4/16/17/18/19/21/22/23 | spare (SPI/UART2) | future modules |
+| 4/16/17/18/19/21/22/23/26 | spare (SPI/UART2 etc.) | future modules |
 
 **Boot & WiFi safety audit (why these exact pins):**
 
 | GPIO | Pin class on ESP32-WROOM-32 | Safe for our use? |
 |---|---|---|
 | 34 | Input-only — no strap role, no WiFi role | ✅ radar OUT drives it push-pull |
-| 26 | ADC2 channel / DAC2 | ✅ digital TRIG output only |
-| 25 | ADC2 channel / DAC1 | ✅ digital ECHO input + divider only |
+| 25 | ADC2 channel / DAC1 | ✅ digital beam input only (comparator DO) |
 | 27 | ADC2 channel / touch T7 | ✅ digital buzzer output |
 
 - The "GPIO 25/26/27 conflict with WiFi" rule is real but applies **only to `analogRead()`** — the WiFi driver owns the ADC2 peripheral, so analog reads on those pins fail while WiFi is active. **Digital I/O and interrupts are unaffected**; this firmware never calls analog functions.
 - **Strapping pins 0, 2, 5, 12, 15 are entirely avoided** — nothing can pull the boot mode, change flash voltage (the classic GPIO-12 killer), or silence boot logs.
 - Flash pins **6–11** and UART0 **1/3** untouched.
 - **GPIO 34 has no internal pull-up/down** (true for all of 34–39): the CDM324's amplified OUT drives it push-pull so nothing is needed — but if the signal ever reads flaky, add an external **10 kΩ pull-up to 3.3 V**. Don't rely on `INPUT_PULLUP` on 34–39; it silently does nothing.
-- Interrupt load is trivial: even at 100 km/h the radar produces ~4,470 pulses/s; the ISR is a single increment.
+- **Laser receiver on GPIO 25 (has internal pull-ups):** the receiver's open-comparator DO idles at a defined level with `INPUT_PULLUP` enabled — no external resistor needed.
+- Interrupt load is trivial: the radar ISR is a single increment (≤ ~4,470 pulses/s at 100 km/h); the beam ISR fires only on state changes (a car passes = 2 edges), debounced in software.
 
 ### 2.2 ESP32-CAM-MB (camera board)
 
@@ -157,21 +155,29 @@ Before enclosure or firmware, verify what your radar module's OUT pin actually o
 
 Each board flashes itself over its own USB. The CAM-MB's CH340 does the flash dance for you — no IO0 jumper. (Driver notes in [FIRMWARE.md](FIRMWARE.md).)
 
-### 5.2 Main wiring — 38-pin hub
+### 5.2 Main wiring — 38-pin hub + far post
 
 | Module | Pin | Connect to |
 |---|---|---|
 | CDM324 radar | VCC | 5V rail |
 | | GND | GND |
 | | OUT | **GPIO 34** (via divider if §3 measured >3.3 V) |
-| HC-SR04 | VCC | 5V rail |
-| | TRIG | **GPIO 26** |
-| | ECHO | **GPIO 25** ← *see level note below* |
+| **Laser receiver** (hub pole) | VCC | 5V rail (or 3.3 V — see note) |
 | | GND | GND |
+| | DO | **GPIO 25** (`INPUT_PULLUP`) |
+| | AO (if present) | leave unconnected |
+| **KY-008 laser TX** (far post) | S | 5V rail *(always-on — no hub pin needed)* |
+| | middle (+) | 5V rail |
+| | − | GND |
+| | — | both rails come down the 22AWG 2-wire run from the hub enclosure |
 | Active buzzer | + | **GPIO 27** |
 | | − | GND |
 
-**HC-SR04 ECHO level note:** HC-SR04 outputs 5 V on ECHO. A 5V-tolerant trick used widely: a **10 kΩ + 20 kΩ divider** (same pair as the radar's — buy 2 sets) drops it to 3.3 V. (Some HC-SR04 clones output 3.3 V already; measure once with a multimeter, then decide if the divider's needed.)
+**Laser receiver level note:** most laser-receiver modules in this family (the "Non-Modulator Tube Laser Receiver" / KY-008-pair type) run a 5 V supply but output a **3.3 V-safe digital DO** from an LM393-style comparator — still, **measure DO once with a multimeter** (beam open vs blocked) before trusting it: if it swings to ~5 V, add the same **10 kΩ + 20 kΩ divider** as the radar's. If your module has an **AO (analog) pin**, ignore it — we only use DO.
+
+**Beam polarity — check once, code-free:** power the pair on the bench, aim TX at receiver, and watch the receiver board's onboard LED (most have one): typically **LED ON / DO LOW = beam intact**, **LED OFF / DO HIGH = beam broken**. The firmware's `BEAM_BREAKS_LOW` constant matches whichever polarity your module uses — set it after this bench check ([FIRMWARE.md §5](FIRMWARE.md#5-tuning-constants)).
+
+**Far-post laser mounting:** KY-008 TX in a small weatherproof box or under an overhang, dot aimed across the lane at the receiver's photodiode. Mount both ends at the same height (plate height is ideal: ~50 cm) so the beam crosses where plates are. Keep the dot small — at ≤ 10 m a 6 mm copper-head module holds a tight dot without optics.
 
 ### 5.3 Main wiring — CAM board
 
@@ -185,17 +191,19 @@ Each board flashes itself over its own USB. The CAM-MB's CH340 does the flash da
 ### 5.4 Power design
 
 ```
- Adapter #1 (5V 2A)                Adapter #2 (5V 2A)
-        │                                 │
-   38-pin HUB                      ESP32-CAM-MB
-   ├── CDM324 (5V, ~30–60 mA)         └── (board's onboard reg makes 3.3V)
-   ├── HC-SR04 (5V, ~15 mA)
-   └── Buzzer (GPIO-driven)
+ Adapter #1 (5V 2A)                       Adapter #2 (5V 2A)
+        │                                       │
+   38-pin HUB                               ESP32-CAM-MB
+   ├── CDM324 (5V, ~30–60 mA)                    └── (board's onboard reg makes 3.3V)
+   ├── Laser receiver (5V, ~5 mA)
+   ├── Buzzer (GPIO-driven)
+   └── 22AWG 2-wire run ──► FAR POST: KY-008 TX (5V, <30 mA)
 ```
 
 - **Separate adapters by design:** WiFi bursts + camera init draw peaks; isolating them means a CAM reboot can't brown-out the hub mid-measurement. (Bench alternative: one adapter + a beefy 1000 µF rail cap, acceptable for testing.)
 - Add a 470–1000 µF electrolytic across the hub's 5V rail.
 - **Radar stability:** keep a cap near the radar's VCC/GND pair so WiFi bursts don't modulate the radar supply (phantom low-speed readings).
+- **Far-post run:** < 30 mA over 22AWG is millivolts of drop — the laser runs full-brightness even at 10 m of cable. Fuse the run (or use an adapter with built-in protection) so a nicked cable can't short the rail.
 
 ---
 
@@ -213,12 +221,13 @@ Each board flashes itself over its own USB. The CAM-MB's CH340 does the flash da
 1. **Layout:** 830-point breadboard + 38-pin board (hub) on one side; CAM-MB on the other; radar module centered behind the front wall; terminal strip for power in/out.
 2. **Radar mounting:** 24 GHz passes through **ABS plastic** (not metal). Mount the CDM324 **inside** the sealed box facing out through the plastic wall — zero apertures for rain. Antenna face within ~2 cm of the wall.
    - Never put metal (screws, brackets, foil) between radar and road.
-3. **HC-SR04 placement:** the ultrasonic transducer must see outdoors — drill two 16 mm holes (transducer + receiver barrels) or mount it just inside a cutout with silicone seal. Aim it at the **trigger zone** (the road point nearest the pole — where the vehicle is when the photo is taken).
-4. **Buzzer:** small drilled port (8 mm) covered with tape.
-5. **Camera window:** large cutout + clear acrylic/PETG sealed with silicone. OV2640 must see the lane at plate height.
-6. **Cable glands:** one for DC power in, one spare for future sensor. Glue-lined heat shrink.
-7. **Desiccant pack** inside — tropical humidity fogs lenses.
-8. Breadboard sticks down with double-sided foam tape (removable for iteration).
+3. **Laser receiver placement:** mount it inside the enclosure behind a small clear window (drill ~10–12 mm, seal with silicone or a glue-lined washer) — the photodiode just needs to see the far-post dot. Aim the window at the **beam axis** (straight across the lane).
+4. **Far-post KY-008 TX:** in its own small weatherproof housing (or tucked under the post cap), dot aimed at the receiver window. The 22AWG run leaves the hub enclosure through a cable gland, follows the curb/ground, and enters the far post's housing — UV ties every 30 cm; conduit sleeve where cars might roll over it.
+5. **Buzzer:** small drilled port (8 mm) covered with tape.
+6. **Camera window:** large cutout + clear acrylic/PETG sealed with silicone. OV2640 must see the lane at plate height.
+7. **Cable glands:** one for DC power in, one for the far-post laser run, one spare for future sensor. Glue-lined heat shrink.
+8. **Desiccant pack** inside — tropical humidity fogs lenses.
+9. Breadboard sticks down with double-sided foam tape (removable for iteration).
 
 ---
 
@@ -236,7 +245,7 @@ Each board flashes itself over its own USB. The CAM-MB's CH340 does the flash da
 
    The firmware's `COSINE_ANGLE_DEG` constant compensates; keep θ small or set the measured install angle.
 3. **Field of view:** clear the beam corridor (a ~15–30° cone) of **swaying branches, banners, AC condenser fans, parked vehicles** — anything moving inside the cone reads as a target.
-4. **HC-SR04 aims at the trigger zone** (near zone, 2–4 m ahead of the pole at plate height): distance suddenly dropping = vehicle physically present → confirms radar event, rejects phantom triggers.
+4. **Beam alignment (one-time, two-person):** one person holds a white card at the receiver window; the other nudges the far-post KY-008 until the red dot lands on the receiver's photodiode hole (receiver LED flips → dot is on target). At ≤ 10 m the dot barely diverges — align once at install and it holds. Re-check after typhoons (a knocked far post is the #1 beam failure mode).
 5. **Bench-verify first:** serial shows Hz values on a hand-wave 1–3 m out, ~0 Hz when still. Then graduate to vehicles ([TESTING.md](TESTING.md)).
 6. Re-check aim after typhoons — a knocked-5° pole quietly adds cosine error to every record.
 
@@ -245,14 +254,15 @@ Each board flashes itself over its own USB. The CAM-MB's CH340 does the flash da
 ## 9. Assembly Checklist
 
 - [ ] §3 IF verification done — waveform confirmed, amplitude recorded, divider fitted if needed
-- [ ] Hub pins: radar→34, HC-SR04→26/25 (ECHO divider if needed), buzzer→27
+- [ ] Hub pins: radar→34, laser receiver DO→25 (divider only if measured >3.3 V), buzzer→27
+- [ ] KY-008 bench check: TX dot visible, receiver LED flips when beam blocked, DO polarity recorded
 - [ ] Both boards power up independently on their own adapters
 - [ ] CAM board: microSD FAT32 in before power; camera focused on trigger zone
 - [ ] 5V rails measure 4.8–5.2 V under WiFi load; cap installed near the radar
 - [ ] Radar faces out through ABS wall, no metal in the beam corridor
-- [ ] HC-SR04 transducers outdoors via sealed cutouts, aimed at the trigger zone
+- [ ] Receiver window drilled + sealed; far-post TX housed; 22AWG run tied down with drip loops
 - [ ] Camera window clear, desiccant in, glands sealed
-- [ ] Serial: ~0 Hz idle noise floor, Hz spikes on hand movement, HC-SR04 distance sane (±3 cm on a wall)
+- [ ] Serial: ~0 Hz idle noise floor, Hz spikes on hand movement; beam blocked → hub prints `BEAM BROKEN`
 
 ---
 
