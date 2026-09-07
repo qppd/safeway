@@ -1,77 +1,73 @@
 # Block Diagram
 
-Hardware blocks and the signals that connect them — the physical view of SafeWay.
+Hardware blocks and the signals that connect them — the physical view of SafeWay. Diagrams are **Mermaid** and render natively on GitHub.
 
 ---
 
 ## 1. Overall System Block Diagram
 
-```
- FAR POST                    HUB POLE (weatherproof enclosure)                 LANE
-┌──────────────┐   650 nm    ┌────────────────────────┐
-│  KY-008      │  laser dot  │  LASER RECEIVER        │
-│  laser TX    │────────────►│  module (comparator)   │──DO──► ┐
-└──────┬───────┘  across the │  behind clear window    │        │
-       │               lane   └────────────────────────┘        ▼
-       │ 22AWG pair                                        ┌─────────────┐
-       │ (5V + GND)                                        │   ESP32     │
-┌──────┴──────────────────────────────────────────────┐   │  38-pin HUB │
-│  ADAPTER #1 (5V 2A)                                 │   │             │
-│  ├─► 38-pin hub 5V rail                              │◄──┤ GPIO 25     │
-│  ├─► CDM324 radar VCC        ┌──────────────────┐   │   │ (beam ISR,  │
-│  ├─► laser receiver VCC      │  CDM324 24 GHz    │   │   │  50 ms de-  │
-│  └─► 22AWG pair ─► far TX    │  Doppler radar    │───┼──►│  bounce)     │
-└──────────────────────────────│  (speed sensing)  │OUT│   │             │
-                               └──────────────────┘   │   │ GPIO 34     │
-                                                     │   │ (pulse ISR,  │
-                               ┌──────────────────┐  │   │  RISING)     │
-                               │  ACTIVE BUZZER   │◄─┼───┤ GPIO 27     │
-                               │  (5V, overspeed) │  │   │             │
-                               └──────────────────┘  │   │ event logic │
-                                                     │   │ Hz→km/h     │
-                                                     │   │ WiFi client │
-                                                     │   └──────┬──────┘
-                                                     │          │ ① WiFi —
-                                                     │          │ GET /capture
-  ADAPTER #2 (5V 2A)                                │          ▼
-  └─► ESP32-CAM-MB 5V   ┌────────────────────────────┴──────────────────┐
-                        │ ESP32-CAM (OV2640) on MB programmer            │
-                        │  • /capture  → JPEG  (+ auto-save to microSD) │
-                        │  • /stream   → live MJPEG                      │
-                        │  • microSD 16 GB Class 10 (photo failover)     │
-                        └───────────────┬────────────────────────┬───────┘
-                                        │                        │ ③ <img> tag
-                              ② WiFi —  │ JSON POST              │ pulls MJPEG
-                              violation │ over the incident      │ directly
-                              event     ▼                        ▼
-                        ┌───────────────────────────┐   ┌──────────────────────┐
-                        │ SERVER (one process)      │   │ SSU BROWSER          │
-                        │ FastAPI + uvicorn :8000   │◄──│ Monitoring Dashboard │
-                        │  • SQLite safeway.db      │ ④ │ • violation table    │
-                        │  • uploads/ photo store   │GET│ • photo pane         │
-                        │  • plate recognition      │   │ • live lane feed     │
-                        │   (OpenALPR / Tesseract)  │   │ • review actions     │
-                        └───────────────────────────┘   └──────────────────────┘
+```mermaid
+flowchart TB
+    subgraph FAR["FAR POST"]
+        TX["KY-008 laser TX"]
+    end
+
+    subgraph POLE["HUB POLE — weatherproof enclosure"]
+        RX["Laser receiver module<br/>comparator behind clear window"]
+        RADAR["CDM324 24 GHz<br/>Doppler radar"]
+        BUZZ["Active buzzer 5 V"]
+        HUB["ESP32 38-pin HUB<br/>pulse ISR — GPIO 34<br/>beam ISR + 50 ms debounce — GPIO 25<br/>buzzer — GPIO 27<br/>event logic · Hz→km/h · WiFi"]
+        CAM["ESP32-CAM (OV2640) on MB board<br/>/capture JPEG + microSD save<br/>/stream live MJPEG<br/>microSD 16 GB failover"]
+        P1["Adapter #1 · 5 V 2 A"]
+        P2["Adapter #2 · 5 V 2 A"]
+    end
+
+    subgraph SRV["SERVER — one process"]
+        API["FastAPI + uvicorn :8000<br/>SQLite safeway.db · uploads/<br/>plate recognition (OpenALPR / Tesseract)"]
+    end
+
+    subgraph SSU["SSU BROWSER"]
+        DASH["Monitoring dashboard<br/>violation table · photo pane · live feed"]
+    end
+
+    TX -- "650 nm dot across the lane" --> RX
+    RX -- "DO → GPIO 25" --> HUB
+    RADAR -- "OUT → GPIO 34" --> HUB
+    HUB -- "GPIO 27" --> BUZZ
+    HUB -- "① GET /capture — fetch photo" --> CAM
+    HUB -- "② POST /api/incidents — JSON" --> API
+    CAM -. "③ MJPEG direct — img tag" .-> DASH
+    API -- "④ GET incidents + photos" --> DASH
+    P1 -.-> HUB
+    P1 -.-> RADAR
+    P1 -.-> RX
+    P1 -- "22AWG 2-core run (10 m)" --> TX
+    P2 -.-> CAM
 ```
 
-**Flows:** ① hub pulls the evidence photo from the CAM · ② hub uploads the incident JSON · ③ dashboard's live feed goes browser→CAM directly (no server relay) · ④ dashboard reads the API.
+**Legend:** solid arrows = data · dotted arrows = power · numbered flows:
+
+- ① hub pulls the evidence photo from the CAM (WiFi)
+- ② hub uploads the incident JSON (WiFi)
+- ③ dashboard live feed goes browser→CAM directly (LAN) — no server relay
+- ④ dashboard reads the API
 
 ---
 
 ## 2. Power Distribution
 
-```
- ADAPTER #1 (5 V 2A) ──┬── 38-pin hub VIN (board + WiFi bursts)
-                      ├── CDM324 VCC          (~30–60 mA)
-                      ├── laser receiver VCC  (~10 mA)
-                      └── 22AWG 2-core run (10 m) ──► far-post KY-008 TX (<30 mA)
-
- ADAPTER #2 (5 V 2A) ──── ESP32-CAM-MB 5V (board + OV2640 + WiFi + SD)
+```mermaid
+flowchart LR
+    A1["Adapter #1 · 5 V 2 A"] --> HUBV["38-pin hub VIN<br/>board + WiFi bursts"]
+    A1 --> RRV["CDM324 VCC<br/>~30–60 mA"]
+    A1 --> LRV["Laser receiver VCC<br/>~10 mA"]
+    A1 --> WIRE["22AWG 2-core run<br/>10 m"] --> TXV["Far-post KY-008 TX<br/>under 30 mA"]
+    A2["Adapter #2 · 5 V 2 A"] --> CAMV["ESP32-CAM-MB 5 V<br/>board + OV2640 + WiFi + SD"]
 ```
 
 - Separate adapters ⇒ a camera reboot can never brown-out the radar mid-measurement.
 - One rail cap recommended when bench-testing from a single supply.
-- Far TX over 22AWG: <30 mA draw — negligible drop over 10 m, no far-side outlet needed.
+- Far TX over 22AWG: under 30 mA draw — negligible drop over 10 m, no far-side outlet needed.
 
 ---
 
@@ -82,7 +78,7 @@ Hardware blocks and the signals that connect them — the physical view of SafeW
 | Doppler IF pulses | CDM324 OUT → GPIO 34 | divider **if** §3 scope check reads >3.3 V | pulse rate = 44.7 Hz per km/h |
 | Beam level | laser RX DO → GPIO 25 | internal pull-up; divider only if DO swings to 5 V | LOW/HIGH = beam intact/broken (`BEAM_BREAKS_LOW`) |
 | Beam (optical) | KY-008 TX → receiver window | 650 nm dot across the lane | blocked = solid object crossing |
-| Alert | GPIO 27 → buzzer | direct (active 5V module) | HIGH while kph > limit |
+| Alert | GPIO 27 → buzzer | direct (active 5V module) | HIGH while kph over limit |
 | Evidence | CAM `/capture` → hub (WiFi) | base64 in memory | JPEG + microSD save |
 | Incident | hub → API (WiFi) | JSON POST | speed, limit, doppler_hz, confirmed, photo |
 

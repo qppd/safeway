@@ -1,29 +1,22 @@
 # System Architecture
 
-Layers, boundaries, and interfaces — how SafeWay is organized as a system, from photons to dashboard.
+Layers, boundaries, and interfaces — how SafeWay is organized as a system, from photons to dashboard. Diagrams are **Mermaid** and render natively on GitHub.
 
 ---
 
 ## 1. Layered View
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ L5  PRESENTATION      SSU browser: dashboard.html (Tailwind +    │
-│                      vanilla JS) — table, photo pane, live feed  │
-├─────────────────────────────────────────────────────────────────┤
-│ L4  APPLICATION       FastAPI :8000 — POST/GET/PATCH incidents, │
-│                      photo serve, cam-status, dashboard hosting │
-├─────────────────────────────────────────────────────────────────┤
-│ L3  DATA & INTELLIGENCE   SQLite (incidents) · uploads/ store ·  │
-│                      plate recognition (OpenALPR / Tesseract)    │
-├─────────────────────────────────────────────────────────────────┤
-│ L2  EDGE DEVICES      ESP32 hub (sensing + event logic +        │
-│                      reporting) · ESP32-CAM (evidence + stream)  │
-├─────────────────────────────────────────────────────────────────┤
-│ L1  SENSING & PHYSICS CDM324 Doppler radar · KY-008 + receiver  │
-│                      break-beam · OV2640 imager · buzzer        │
-└─────────────────────────────────────────────────────────────────┘
-        L1→L2 electrical (GPIO)   L2→L4 WiFi HTTP   L4→L5 HTTP/HTML
+```mermaid
+flowchart TB
+    L5["L5 · PRESENTATION<br/>SSU browser: dashboard.html — Tailwind + vanilla JS<br/>table · photo pane · live feed"]
+    L4["L4 · APPLICATION<br/>FastAPI :8000 — POST/GET/PATCH incidents<br/>photo serve · cam-status · dashboard hosting"]
+    L3["L3 · DATA &amp; INTELLIGENCE<br/>SQLite (incidents) · uploads/ store<br/>plate recognition (OpenALPR / Tesseract)"]
+    L2["L2 · EDGE DEVICES<br/>ESP32 hub: sensing + event logic + reporting<br/>ESP32-CAM: evidence + stream"]
+    L1["L1 · SENSING &amp; PHYSICS<br/>CDM324 Doppler radar · KY-008 + receiver break-beam<br/>OV2640 imager · buzzer"]
+    L1 -- "GPIO electrical" --> L2
+    L2 -- "WiFi HTTP" --> L4
+    L4 -- "HTTP / HTML" --> L5
+    L3 --- L4
 ```
 
 **Key boundary decisions:**
@@ -58,12 +51,12 @@ Layers, boundaries, and interfaces — how SafeWay is organized as a system, fro
 
 ## 4. Network Topology
 
-```
- [Campus WiFi 2.4 GHz — same subnet for all three]
-
- ESP32 hub ─┐                ┌─► Server (uvicorn :8000, DHCP-reserved)
-            ├─ (W) ── (AP) ──┤
- ESP32-CAM ─┘                └─► SSU browsers (LAN / campus network)
+```mermaid
+flowchart LR
+    HUB["ESP32 hub"] --> AP["Campus WiFi AP<br/>2.4 GHz — one subnet"]
+    CAMB["ESP32-CAM"] --> AP
+    AP --> SRV["Server<br/>uvicorn :8000<br/>DHCP-reserved"]
+    AP --> SSUB["SSU browsers<br/>LAN / campus network"]
 ```
 
 - All three WiFi actors sit on one subnet so browser→CAM streaming (I7) works without a relay.
@@ -85,11 +78,10 @@ Layers, boundaries, and interfaces — how SafeWay is organized as a system, fro
 
 ## 6. Deployment Topology (POC → production path)
 
-| Stage | What runs where |
-|---|---|
-| POC / evaluation | One laptop: FastAPI + SQLite + dashboard; both boards on bench WiFi |
-| Pilot (one lane) | Campus server or mini-PC in a guard post; one pole unit + far post |
-| Scale (multi-lane) | Per-lane pole units all POST to one server; SQLite → PostgreSQL; uploads/ → object storage |
+```mermaid
+flowchart LR
+    POC["POC / evaluation<br/>one laptop: FastAPI + SQLite + dashboard<br/>both boards on bench WiFi"] --> PILOT["Pilot — one lane<br/>campus server or mini-PC in guard post<br/>one pole unit + far post"] --> SCALE["Scale — multi-lane<br/>per-lane pole units → one server<br/>SQLite → PostgreSQL · uploads/ → object storage"]
+```
 
 The architecture doesn't change between stages — only where the server process runs and which database driver it opens.
 
