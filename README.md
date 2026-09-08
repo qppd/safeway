@@ -76,31 +76,24 @@ Core components (full verified shopping list with Lazada PH links, prices, and r
 
 ## System Architecture
 
-```
- Road lane ──────────────────────► direction of travel
-          (10–30 m radar coverage)
+```mermaid
+flowchart TB
+    RADAR["CDM324 Doppler radar<br/>IF = 44.7 Hz per km/h"]
+    BEAM["KY-008 + receiver<br/>break-beam across lane"]
+    HUB["ESP32 38-pin HUB — sensors<br/>radar → GPIO 34 · beam → GPIO 25 · buzzer → GPIO 27<br/>peak speed = Hz ÷ 44.7 ÷ cos(mount angle)"]
+    CAM["ESP32-CAM-MB — camera<br/>/capture → JPEG + SD save<br/>/stream → live MJPEG"]
+    API["Cloud API + Database<br/>incident records + photos<br/>plate number recognition"]
+    DASH["Monitoring Dashboard (SSU)<br/>live lane feed + violation table + photo pane"]
 
- ┌ ESP32 38-pin HUB (sensors) ──────────────────────┐
- │  • CDM324 OUT ──► GPIO 34   (Doppler pulse count)│
- │  • Laser RX DO ─► GPIO 25   (presence confirm)   │
- │  • Buzzer ──────► GPIO 27    (overspeed alert)    │
- │  • peak speed = Hz ÷ 44.7 ÷ cos(mount angle)      │
- └───────────┬───────────────────────────────────────┘
-             │ WiFi — fetch photo, JSON POST
-             │            ┌ ESP32-CAM-MB (camera) ────┐
-             │            │  • /capture → JPEG + SD save│
-             ├───────────►│  • /stream → live MJPEG     │
-             │            └────────────┬───────────────┘
-             ▼                         │ live feed
- ┌ Cloud API + Database ──────────────┐ │
- │  • incident records + photos       │ │
- │  • plate number recognition        │ │
- └────────────┬───────────────────────┘ │
-              ▼                         ▼
- ┌ Monitoring Dashboard (SSU) ─────────────────────┐
- │  live lane feed + violation table + photo pane  │
- └─────────────────────────────────────────────────┘
+    RADAR --> HUB
+    BEAM --> HUB
+    HUB -- "WiFi — fetch photo, JSON POST" --> CAM
+    HUB -- "violation event" --> API
+    CAM -- "live feed" --> DASH
+    API --> DASH
 ```
+
+Details: [docs/BLOCK-DIAGRAM.md](docs/BLOCK-DIAGRAM.md) · [docs/SYSTEM-ARCHITECTURE.md](docs/SYSTEM-ARCHITECTURE.md) · [docs/FLOWCHART.md](docs/FLOWCHART.md)
 
 ## Repository Structure
 
