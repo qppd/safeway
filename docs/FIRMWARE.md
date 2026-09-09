@@ -6,7 +6,7 @@ Two independent sketches, one per board. Each flashes over its own USB port.
 
 | Sketch | Board | Job |
 |---|---|---|
-| `safeway-cam` | ESP32-CAM-MB | photo server: `/capture` (JPEG) + `/stream` (live MJPEG) + SD backup |
+| `safeway-cam` | ESP32-CAM-MB | photo server: `/capture` (JPEG) + `/stream` (polled live frame) + SD backup |
 | `safeway-hub` | ESP32 38-pin | Doppler speed + break-beam confirm + buzzer + fetch photo + upload to API |
 
 ---
@@ -29,13 +29,13 @@ Two independent sketches, one per board. Each flashes over its own USB port.
 
 ## 2. Sketch 1 — `safeway-cam` (camera board)
 
-Serves one still endpoint and one stream endpoint, and saves every captured photo to microSD as the local backup.
+Serves two still endpoints and a status page; every **violation capture** is saved to microSD as the local backup (live-view frames never touch the card).
 
 ```cpp
 /* safeway-cam — ESP32-CAM (AI-Thinker) on MB programmer board
    Endpoints:  /capture  -> single JPEG (also saved to microSD)
-               /stream   -> MJPEG live feed (dashboard "Live" pane)
-               /         -> tiny status page                                  */
+               /stream   -> single JPEG frame, no SD write (dashboard polls ~1/s)
+               /         -> tiny status page, no frame grab                    */
 
 #include "esp_camera.h"
 #include <WiFi.h>
@@ -72,8 +72,8 @@ bool camInit() {
   cc.ledc_channel = LEDC_CHANNEL_0;
   cc.ledc_timer   = LEDC_TIMER_0;
   cc.pin_pwdn     = PWDN_GPIO_NUM;  cc.pin_reset = RESET_GPIO_NUM;
-  cc.pin_xclk     = XCLK_GPIO_NUM;  cc.pin_ssc_siod = SIOD_GPIO_NUM;
-  cc.pin_ssc_sioc = SIOC_GPIO_NUM;  cc.pin_vsync = VSYNC_GPIO_NUM;
+  cc.pin_xclk     = XCLK_GPIO_NUM;  cc.pin_sccb_sda = SIOD_GPIO_NUM;
+  cc.pin_sccb_scl = SIOC_GPIO_NUM;  cc.pin_vsync = VSYNC_GPIO_NUM;
   cc.pin_href     = HREF_GPIO_NUM;  cc.pin_pclk  = PCLK_GPIO_NUM;
   cc.pin_d0 = Y2_GPIO_NUM; cc.pin_d1 = Y3_GPIO_NUM;
   cc.pin_d2 = Y4_GPIO_NUM; cc.pin_d3 = Y5_GPIO_NUM;
@@ -83,8 +83,9 @@ bool camInit() {
   cc.pixel_format = PIXFORMAT_JPEG;
   cc.frame_size   = FRAMESIZE_SVGA;      // 800x600 — plate-readable, small upload
   cc.jpeg_quality = 12;                   // lower = better, heavier
-  cc.fb_count     = 1;
-  cc.grab_mode    = CAMERA_GRAB_LATEST;
+  cc.fb_count     = 2;                    // grab latest while serving the previous
+  cc.fb_location  = CAMERA_FB_IN_PSRAM;   // frames in PSRAM — internal heap stays free for WiFi
+  cc.grab_mode    = CAMERA_GRAB_LATEST;  // (no-PSRAM clone board? use FRAMESIZE_VGA, fb_count 1)
   return esp_camera_init(&cc) == ESP_OK;
 }
 
@@ -105,40 +106,26 @@ void setup() {
 }
 
 void loop() {
+  // One connection at a time, but every request now finishes in well under a
+  // second — so the hub's /capture is never stuck behind a long-running stream
+  // (see the note below the sketch).
   WiFiClient c = server.available();
   if (!c) return;
   String req = c.readStringUntil('\r'); c.readStringUntil('\n');
   String path = req.substring(req.indexOf(' ') + 1);
   path = path.substring(0, path.indexOf(' '));
+  if (path.indexOf('?') >= 0) path = path.substring(0, path.indexOf('?'));  // strip ?ts= cache-buster
 
-  camera_fb_t* fb = nullptr;
-  if (path == "/capture" || path == "/") {
-    fb = esp_camera_fb_get();
-    if (fb && path == "/capture") sdSave(fb);
-  }
-
-  if (path == "/capture" && fb) {           // single JPEG
+  if (path == "/capture" || path == "/stream") {          // single JPEG
+    camera_fb_t* fb = esp_camera_fb_get();
+    if (!fb) { c.println("HTTP/1.1 503\nConnection: close\n"); c.stop(); return; }
+    if (path == "/capture") sdSave(fb);                   // only violations hit the microSD
     c.println("HTTP/1.1 200 OK\nContent-Type: image/jpeg");
     c.println("Content-Length: " + String(fb->len) + "\n");
     c.write(fb->buf, fb->len);
     esp_camera_fb_return(fb);
   }
-  else if (path == "/stream") {             // MJPEG live feed
-    if (fb) esp_camera_fb_return(fb);
-    c.println("HTTP/1.1 200 OK\nContent-Type: multipart/x-mixed-replace; boundary=sw");
-    while (c.connected()) {
-      fb = esp_camera_fb_get();
-      if (!fb) continue;
-      c.println("--sw\nContent-Type: image/jpeg");
-      c.println("Content-Length: " + String(fb->len) + "\n");
-      c.write(fb->buf, fb->len);
-      c.println();
-      esp_camera_fb_return(fb);
-      // ~10 fps cap
-    }
-  }
-  else if (path == "/" && fb) {             // status page
-    if (fb) esp_camera_fb_return(fb);
+  else if (path == "/") {                                 // status page — no frame grab
     c.println("HTTP/1.1 200 OK\nContent-Type: text/html\n\n"
               "<h2>SafeWay CAM</h2>/capture /stream OK");
   }
@@ -146,6 +133,8 @@ void loop() {
   delay(5); c.stop();
 }
 ```
+
+**Why polled frames, not a true MJPEG stream?** A single-core ESP32 serving an endless multipart stream blocks its one HTTP server — while SSU watches live video, the hub's `/capture` would never get served, and violations would upload photoless. Serving one JPEG per request keeps every connection sub-second, so `/capture` is (virtually) always answerable; the dashboard gets a ~1 frame/s feed — plenty for lane monitoring — and the microSD only ever holds violation evidence, not live-view junk. True 10 fps streaming needs a dual-core split or RTSP — that's the upgrade path, not the POC.
 
 **Write down the IP it prints** (e.g. `192.168.1.45`) — the hub and the dashboard both need it. For production, give the CAM a **DHCP reservation** on the campus router so it never changes ([DEPLOYMENT.md §pre-install](DEPLOYMENT.md#2-pre-install-checklist)).
 
@@ -200,7 +189,7 @@ IRAM_ATTR void onBeamEdge() {
 }
 
 float lastKph = 0, peakKph = 0, peakHz = 0;
-uint32_t winStart = 0, lastActiveMs = 0, beamBrokenMs = 0;
+uint32_t winStart = 0, lastActiveMs = 0;
 bool inEvent = false, beamConfirmed = false;
 
 float kphFromHz(float hz) {
@@ -209,35 +198,34 @@ float kphFromHz(float hz) {
   return measured;
 }
 
-bool uploadIncident(float kph, float hz, bool confirmed, const String& photoB64) {
-  WiFiClient wc; HTTPClient http;
-  http.begin(wc, API_URL);
-  http.addHeader("Content-Type", "application/json");
+// Fetch the photo and POST the incident in one pass: base64 chunks go straight
+// into the (pre-reserved) request body — one big heap allocation, never two
+// full copies of a 40-70 KB payload competing with the WiFi stack.
+bool uploadIncident(float kph, float hz, bool confirmed) {
   String body = "{\"device_id\":\"safeway-01\",\"speed_kph\":" + String(kph, 1)
               + ",\"limit_kph\":" + String(SPEED_LIMIT_KPH, 0)
               + ",\"doppler_hz\":" + String(hz, 0)
               + ",\"confirmed\":" + (confirmed ? "true" : "false")
-              + ",\"photo_b64\":\"" + photoB64 + "\"}";
-  int code = http.POST(body);
-  http.end();
-  return code == 200 || code == 201;
-}
-
-String fetchPhotoB64() {                    // GET /capture from the CAM
+              + ",\"photo_b64\":\"";
   WiFiClient wc; HTTPClient http;
   http.begin(wc, String("http://") + CAM_IP + "/capture");
   int code = http.GET();
-  if (code != 200) { http.end(); return ""; }
-  int len = http.getSize();
-  String b64;
-  if (len > 0) b64.reserve(base64::encodeLength(len));
-  WiFiClient* s = http.getStreamPtr();
-  uint8_t buf[512];
-  int got;
-  while ((got = s->readBytes(buf, sizeof(buf))) > 0)
-    b64 += base64::encode(buf, got);
+  if (code == 200) {
+    WiFiClient* s = http.getStreamPtr();
+    int len = http.getSize();               // -1 if unknown
+    if (len > 0) body.reserve(body.length() + (size_t)len * 4 / 3 + 8);
+    uint8_t buf[512]; int got;
+    while ((got = s->readBytes(buf, sizeof(buf))) > 0)
+      body += base64::encode(buf, got);
+  }
+  body += "\"}";                           // no photo -> empty field; CAM microSD holds the copy
   http.end();
-  return b64;
+  WiFiClient wc2; HTTPClient post;
+  post.begin(wc2, API_URL);
+  post.addHeader("Content-Type", "application/json");
+  int rcode = post.POST(body);
+  post.end();
+  return rcode == 200 || rcode == 201;
 }
 
 void setup() {
@@ -277,7 +265,6 @@ void loop() {
     // laser break-beam: did a solid object cross the lane during the event?
     if (beamBroken) {
       beamConfirmed = true;
-      beamBrokenMs = millis();
       Serial.println("BEAM BROKEN");
     }
 
@@ -297,8 +284,11 @@ void loop() {
         // confirm beep
         for (int i = 0; i < 2; i++) { digitalWrite(PIN_BUZZER, HIGH); delay(120);
                                      digitalWrite(PIN_BUZZER, LOW);  delay(80); }
-        String photo = fetchPhotoB64();
-        bool ok = uploadIncident(peakKph, peakHz, beamConfirmed, photo);
+        // the handler below blocks ~1-5 s: discard pulses gathered during it so
+        // they don't dilute the next window's Hz reading (see design notes)
+        noInterrupts(); pulses = 0; interrupts();
+        winStart = millis();
+        bool ok = uploadIncident(peakKph, peakHz, beamConfirmed);
         Serial.println(ok ? "uploaded" : "UPLOAD FAILED (photo on CAM microSD)");
       } else {
         Serial.printf("pass: %.1f km/h (under limit)\n", peakKph);
@@ -314,6 +304,8 @@ void loop() {
 - **Buzzer behavior:** sounds *while* the vehicle is actively over the limit (warns the driver in real time, per the paper's intent) + a confirmation double-beep when the violation is logged.
 - **`confirmed` field:** the break-beam broke during the radar event → a solid object physically crossed the lane → guards against radar phantoms (branches, pedestrians). Dashboard shows it; SSU filters on it.
 - **Fail-safe:** if the CAM or WiFi is down, the CAM's microSD still holds every photo (`/capture` handler saves before serving) — pull the card during maintenance ([DEPLOYMENT.md §4](DEPLOYMENT.md#4-connectivity-failover-notes)).
+- **Single-copy upload:** the photo's base64 is encoded directly into the reserved POST body — never a second 50–90 KB heap copy. Frames live in PSRAM; internal heap stays free for WiFi.
+- **Blocking close-out (known limit):** the violation handler (double-beep + photo fetch + POST) blocks the loop for ~1–5 s; pulses arriving during it are discarded, so a car entering mid-upload is measured from its next 300 ms window (peak-hold still catches its peak). A per-event async state machine is the upgrade path.
 - **HB100 variant?** change one constant (`HZ_PER_KPH = 19.49`) — nothing else.
 
 ---
@@ -332,7 +324,7 @@ void loop() {
 
 ### 4.3 Bench smoke test (before mounting anything)
 1. Hub serial shows `ACTIVE` lines when you wave a hand in front of the radar.
-2. Browser on the same WiFi: `http://<cam-ip>/stream` → live feed moves.
+2. Browser on the same WiFi: `http://<cam-ip>/stream` → a frame appears (the dashboard's live pane re-polls it ~1/s).
 3. Block/unblock the laser beam with a book at ~1 m → hub prints `BEAM BROKEN`, boot message shows beam state.
 4. With the API running ([BACKEND.md](BACKEND.md)): drive a phone-flashlight "event" over the radar at speed → dashboard shows the incident with photo.
 
@@ -349,6 +341,7 @@ void loop() {
 | `MIN_SPEED_KPH` | 5 | noise floor; raise if tree-wobble false-triggers |
 | Window | 300 ms | shorter = faster response, noisier Hz estimate |
 | Event close | 1500 ms | silence before closing an event (lane clear) |
+| Violation upload | blocking ~1–5 s | pulses during the upload are discarded; async upload = upgrade path |
 
 Tuning order for the field: `MIN_SPEED_KPH` first (kill phantom triggers), then `BEAM_BREAKS_LOW` from the bench polarity check, then `COSINE_ANGLE_DEG` from your measured install angle.
 

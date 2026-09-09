@@ -34,7 +34,7 @@ A single pole-mounted unit watches the lane. The **CDM324 24 GHz Doppler radar**
   │                                     └── WiFi ── fetches CAM photo, POSTs to API
   │                                     ESP32-CAM-MB
   │                                     ├── OV2640 /capture  (violation snapshot)
-  │                                     ├── /stream  (MJPEG live feed for dashboard)
+  │                                     ├── /stream  (polled live frame for dashboard)
   │                                     └── microSD: local backup of every photo
   └────────────────────┬────────────────────────────────┘
                        │ campus WiFi
@@ -177,7 +177,7 @@ Each board flashes itself over its own USB. The CAM-MB's CH340 does the flash da
 
 **Beam polarity — check once, code-free:** power the pair on the bench, aim TX at receiver, and watch the receiver board's onboard LED (most have one): typically **LED ON / DO LOW = beam intact**, **LED OFF / DO HIGH = beam broken**. The firmware's `BEAM_BREAKS_LOW` constant matches whichever polarity your module uses — set it after this bench check ([FIRMWARE.md §5](FIRMWARE.md#5-tuning-constants)).
 
-**Far-post laser mounting:** KY-008 TX in a small weatherproof box or under an overhang, dot aimed across the lane at the receiver's photodiode. Mount both ends at the same height (plate height is ideal: ~50 cm) so the beam crosses where plates are. Keep the dot small — at ≤ 10 m a 6 mm copper-head module holds a tight dot without optics.
+**Far-post laser mounting:** KY-008 TX in a small weatherproof box or under an overhang, dot aimed across the lane at the receiver's photodetector. Mount both ends at the same height (plate height is ideal: ~50 cm) so the beam crosses where plates are. Keep the dot small — at ≤ 10 m a 6 mm copper-head module holds a tight dot without optics.
 
 ### 5.3 Main wiring — CAM board
 
@@ -221,7 +221,7 @@ Each board flashes itself over its own USB. The CAM-MB's CH340 does the flash da
 1. **Layout:** 830-point breadboard + 38-pin board (hub) on one side; CAM-MB on the other; radar module centered behind the front wall; terminal strip for power in/out.
 2. **Radar mounting:** 24 GHz passes through **ABS plastic** (not metal). Mount the CDM324 **inside** the sealed box facing out through the plastic wall — zero apertures for rain. Antenna face within ~2 cm of the wall.
    - Never put metal (screws, brackets, foil) between radar and road.
-3. **Laser receiver placement:** mount it inside the enclosure behind a small clear window (drill ~10–12 mm, seal with silicone or a glue-lined washer) — the photodiode just needs to see the far-post dot. Aim the window at the **beam axis** (straight across the lane).
+3. **Laser receiver placement:** mount it inside the enclosure behind a small clear window (drill ~10–12 mm, seal with silicone or a glue-lined washer) — the photodetector just needs to see the far-post dot. Aim the window at the **beam axis** (straight across the lane).
 4. **Far-post KY-008 TX:** in its own small weatherproof housing (or tucked under the post cap), dot aimed at the receiver window. The 22AWG run leaves the hub enclosure through a cable gland, follows the curb/ground, and enters the far post's housing — UV ties every 30 cm; conduit sleeve where cars might roll over it.
 5. **Buzzer:** small drilled port (8 mm) covered with tape.
 6. **Camera window:** large cutout + clear acrylic/PETG sealed with silicone. OV2640 must see the lane at plate height.
@@ -245,7 +245,7 @@ Each board flashes itself over its own USB. The CAM-MB's CH340 does the flash da
 
    The firmware's `COSINE_ANGLE_DEG` constant compensates; keep θ small or set the measured install angle.
 3. **Field of view:** clear the beam corridor (a ~15–30° cone) of **swaying branches, banners, AC condenser fans, parked vehicles** — anything moving inside the cone reads as a target.
-4. **Beam alignment (one-time, two-person):** one person holds a white card at the receiver window; the other nudges the far-post KY-008 until the red dot lands on the receiver's photodiode hole (receiver LED flips → dot is on target). At ≤ 10 m the dot barely diverges — align once at install and it holds. Re-check after typhoons (a knocked far post is the #1 beam failure mode).
+4. **Beam alignment (one-time, two-person):** one person holds a white card at the receiver window; the other nudges the far-post KY-008 until the red dot lands on the receiver's photodetector (receiver LED flips → dot is on target). At ≤ 10 m the dot barely diverges — align once at install and it holds. Re-check after typhoons (a knocked far post is the #1 beam failure mode).
 5. **Bench-verify first:** serial shows Hz values on a hand-wave 1–3 m out, ~0 Hz when still. Then graduate to vehicles ([TESTING.md](TESTING.md)).
 6. Re-check aim after typhoons — a knocked-5° pole quietly adds cosine error to every record.
 

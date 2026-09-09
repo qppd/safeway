@@ -40,7 +40,7 @@ Speed = Doppler frequency ÷ 44.7 Hz-per-km/h
 1. A vehicle enters the radar beam of the **CDM324 24 GHz Doppler module** (mounted on a single pole along the lane)
 2. The radar's IF output frequency is **directly proportional to speed** — the ESP32 hub counts pulses, converts Hz → km/h, and holds the **peak** reading for the event
 3. A **KY-008 laser break-beam** across the lane (transmitter on a far post, receiver on the hub pole) confirms a vehicle is physically present (rejects phantom radar triggers from branches/pedestrians)
-4. If peak speed > limit (e.g. 20 km/h campus limit):
+4. If peak speed > limit (e.g. 30 km/h campus limit — `SPEED_LIMIT_KPH`):
    - **Buzzer** sounds a live warning while the vehicle is over the limit
    - The hub fetches a photo from the **ESP32-CAM** (`/capture`), which also saves it to microSD
    - Incident record (speed, raw Doppler Hz, confirm flag, photo) is **POSTed to the cloud API**
@@ -50,7 +50,7 @@ Speed = Doppler frequency ÷ 44.7 Hz-per-km/h
 
 - **Doppler radar speed detection** — direct physical measurement: speed is read from the Doppler shift itself, not timed between two gates
 - **Two-board architecture** — 38-pin ESP32 hub owns all sensors; ESP32-CAM owns imaging. WiFi between them, no data cables
-- **Live lane feed** — SSU sees the monitored road in real time from the dashboard
+- **Live lane feed** — SSU sees the monitored road from the dashboard (polled ~1 frame/s)
 - **Dual-sensor confirmation** — radar + laser break-beam agreement flags each incident (evidence-grade: raw Doppler Hz stored with every record)
 - Photo evidence capture with microSD backup logging
 - Cloud data logging through REST API integration
@@ -67,7 +67,7 @@ Core components (full verified shopping list with Lazada PH links, prices, and r
 |---|---|
 | CDM324 24 GHz Doppler radar | Speed measurement (IF frequency = 44.7 Hz per km/h) |
 | ESP32 38-pin dev board | Sensor hub — pulse counting, beam confirm, buzzer, cloud upload |
-| ESP32-CAM + MB programmer board | Camera board — photo snapshots, live MJPEG stream, microSD backup |
+| ESP32-CAM + MB programmer board | Camera board — photo snapshots, polled live feed, microSD backup |
 | KY-008 laser TX + receiver pair | Presence confirmation — far-post transmitter, hub-pole receiver, break-beam across the lane |
 | Active buzzer 5V | Overspeed alert |
 | microSD 16GB Class 10 | Local photo backup on the CAM board |
@@ -81,7 +81,7 @@ flowchart TB
     RADAR["CDM324 Doppler radar<br/>IF = 44.7 Hz per km/h"]
     BEAM["KY-008 + receiver<br/>break-beam across lane"]
     HUB["ESP32 38-pin HUB — sensors<br/>radar → GPIO 34 · beam → GPIO 25 · buzzer → GPIO 27<br/>peak speed = Hz ÷ 44.7 ÷ cos(mount angle)"]
-    CAM["ESP32-CAM-MB — camera<br/>/capture → JPEG + SD save<br/>/stream → live MJPEG"]
+    CAM["ESP32-CAM-MB — camera<br/>/capture → JPEG + SD save<br/>/stream → polled live frame"]
     API["Cloud API + Database<br/>incident records + photos<br/>plate number recognition"]
     DASH["Monitoring Dashboard (SSU)<br/>live lane feed + violation table + photo pane"]
 
@@ -111,7 +111,8 @@ safeway/
 │   ├── BLOCK-DIAGRAM.md    ← hardware blocks & signal chains
 │   ├── FLOWCHART.md        ← runtime decision logic
 │   ├── SYSTEM-ARCHITECTURE.md ← layers, interfaces, failure modes
-└── .gitignore              ← repo hygiene rules
+├── .gitignore              ← repo hygiene rules
+└── LICENSE                 ← CC BY 4.0
 ```
 
 ## Build Guide
@@ -176,4 +177,4 @@ Software quality is assessed against **ISO/IEC 25010** and the IoT architecture 
 
 Pilot client: a university **Security & Safety Unit**. This project follows the PPDIOO network lifecycle framework (Cisco). The full academic manuscript is kept private and is available from the team on request.
 
-Per the capstone disclaimer: *"The project report or any portion thereof including the source code, or any section may be freely copied and distributed provided that the source is acknowledged."*
+Per the capstone disclaimer, this repository is licensed under **[CC BY 4.0](LICENSE)** — free to copy and distribute provided the source is acknowledged.

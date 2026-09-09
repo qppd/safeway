@@ -10,7 +10,7 @@ Layers, boundaries, and interfaces — how SafeWay is organized as a system, fro
 flowchart TB
     L5["L5 · PRESENTATION<br/>SSU browser: dashboard.html — Tailwind + vanilla JS<br/>table · photo pane · live feed"]
     L4["L4 · APPLICATION<br/>FastAPI :8000 — POST/GET/PATCH incidents<br/>photo serve · cam-status · dashboard hosting"]
-    L3["L3 · DATA &amp; INTELLIGENCE<br/>SQLite (incidents) · uploads/ store<br/>plate recognition (OpenALPR / Tesseract)"]
+    L3["L3 · DATA &amp; INTELLIGENCE<br/>SQLite (incidents) · uploads/ store<br/>plate recognition (OpenCV + Tesseract)"]
     L2["L2 · EDGE DEVICES<br/>ESP32 hub: sensing + event logic + reporting<br/>ESP32-CAM: evidence + stream"]
     L1["L1 · SENSING &amp; PHYSICS<br/>CDM324 Doppler radar · KY-008 + receiver break-beam<br/>OV2640 imager · buzzer"]
     L1 -- "GPIO electrical" --> L2
@@ -32,7 +32,7 @@ flowchart TB
 | CDM324 radar | IF pulse generation (44.7 Hz/km/h) | — |
 | Break-beam pair | presence edge across the lane | speed (radar's job) |
 | ESP32 hub | pulse counting, beam ISR+debounce, Hz→km/h, cosine correction, peak-hold, buzzer, photo fetch, incident POST | OCR, long-term storage |
-| ESP32-CAM | capture on demand, MJPEG stream, microSD save | speed logic, upload |
+| ESP32-CAM | capture on demand, polled live frame, microSD save | speed logic, upload |
 | FastAPI server | validation, server-side timestamps, photo storage, OCR orchestration, dashboard hosting | sensing decisions |
 | Dashboard | read, filter, review, view live feed | write raw records (only PATCH review) |
 
@@ -44,10 +44,9 @@ flowchart TB
 | I2 | Beam RX DO → hub GPIO 25 | electrical, CHANGE ISR | level encodes intact/broken (`BEAM_BREAKS_LOW`) |
 | I3 | Buzzer ← GPIO 27 | electrical | HIGH = over limit |
 | I4 | Hub → CAM `GET /capture` | WiFi HTTP | returns JPEG (+ SD save) |
-| I5 | Hub → CAM `GET /stream` | WiFi HTTP | MJPEG (dashboard pulls it too, I7) |
+| I5 | Browser → CAM `GET /stream` | LAN HTTP, polled ~1/s | one JPEG per request — pseudo-live, direct, no server relay |
 | I6 | Hub → API `POST /api/incidents` | WiFi HTTP JSON | device_id, speed_kph, limit_kph, doppler_hz, confirmed, photo_b64 → 201 |
-| I7 | Browser → CAM `<img>` | LAN HTTP | MJPEG, direct — no server relay |
-| I8 | Browser → API GET/PATCH | HTTP JSON | list/filter incidents; mark reviewed; photos |
+| I7 | Browser → API GET/PATCH | HTTP JSON | list/filter incidents; mark reviewed; photos |
 
 ## 4. Network Topology
 
@@ -59,7 +58,7 @@ flowchart LR
     AP --> SSUB["SSU browsers<br/>LAN / campus network"]
 ```
 
-- All three WiFi actors sit on one subnet so browser→CAM streaming (I7) works without a relay.
+- All three WiFi actors sit on one subnet so the browser→CAM frame poll (I5) works without a relay.
 - DHCP reservations for hub + CAM + server — static addressing makes `CAM_IP` in firmware and the stream URL in the dashboard stable forever.
 - Server can live on a laptop (POC), a campus server, or a small VPS; only requirement is LAN reachability from the pole for photo fetch, and campus reachability for the dashboard.
 

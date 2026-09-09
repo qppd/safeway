@@ -68,7 +68,7 @@ The E-WOITD module sold on Lazada PH is the ICStation-style board with onboard t
 
 **Range:** roughly 10–30 m on a car-sized target (module gain dependent). More than enough for a campus lane.
 
-> **Note on the paper:** the reference study (safeway.pdf) specced **two IR break-beam sensors** for speed and an HC-SR04 as "supplementary detection (optional redundancy)". This build replaces all of them: the **CDM324 radar** takes over speed measurement (direct, physics-exact, no sun-blind receivers, no beam alignment, better multi-lane behavior), and a **KY-008 laser break-beam pair** takes over presence confirmation — same break-beam principle as the paper's IR gates but at visible 650 nm with a photoresistor-based receiver module, so it isn't fooled by sunlight the way raw IR photodiodes are, and it spans the lane on a cheap 2-wire run. The HC-SR04 is dropped entirely (no ultrasonic in this build).
+> **Note on the paper:** the reference study (safeway.pdf) specced **two IR break-beam sensors** for speed and an HC-SR04 as "supplementary detection (optional redundancy)". This build replaces all of them: the **CDM324 radar** takes over speed measurement (direct, physics-exact, no sun-blind receivers, no beam alignment, better multi-lane behavior), and a **KY-008 laser break-beam pair** takes over presence confirmation — same break-beam principle as the paper's IR gates but at visible 650 nm with a photodetector-based receiver module, so it isn't fooled by sunlight the way raw IR photodiodes are, and it spans the lane on a cheap 2-wire run. The HC-SR04 is dropped entirely (no ultrasonic in this build).
 
 ---
 
@@ -104,7 +104,7 @@ The E-WOITD module sold on Lazada PH is the ICStation-style board with onboard t
 - **URL:** https://www.lazada.com.ph/products/pdp-i5141273577.html
 - **Backup (TX only):** KY-008 module from Fulabs ₱44 — https://www.lazada.com.ph/products/pdp-i5367051449.html (pair it with a separate laser-receiver module; e.g. "Laser Receiver Sensor" ₱165, Laguna — https://www.lazada.com.ph/products/pdp-i4352848577.html)
 - **Backup 2 (kit):** "KY-008 Laser Transmitter + Non-Modulator Laser Receiver Module Kit" ₱626 — https://www.lazada.com.ph/products/pdp-i15568605059.html
-- Role: **KY-008 TX** sits on the far post (650 nm red laser, ~5 mW, always-on); the **receiver module** (photodiode/photoresistor front-end, comparator with digital DO output) sits on the hub pole. A vehicle crossing the lane breaks the beam → DO changes state → hub flags "vehicle physically present" to confirm the radar event. This replaces the paper's IR break-beam concept with a visible-light version that resists sunlight interference.
+- Role: **KY-008 TX** sits on the far post (650 nm red laser, ~5 mW, always-on); the **receiver module** (photodetector front-end — photodiode or LDR depending on module — with comparator and digital DO output) sits on the hub pole. A vehicle crossing the lane breaks the beam → DO changes state → hub flags "vehicle physically present" to confirm the radar event. This replaces the paper's IR break-beam concept with a visible-light version that resists sunlight interference.
 - KY-008 pinout: **S = signal** (tie to 5 V for always-on — simplest), **middle = +5 V**, **− = GND**. Draws < 30 mA.
 - **Safety note:** 5 mW / 650 nm is Class 3R-adjacent — never look into the beam, don't aim at eye level of drivers/pedestrians; mount it low (plate height) and aim it across the lane at the receiver, not along it.
 

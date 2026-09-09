@@ -30,7 +30,7 @@ flowchart TB
     CLOSE --> OVER{"peak &gt; 30 km/h ?"}
     OVER -- "no" --> PASS["log pass — under limit"]
     OVER -- "yes — VIOLATION" --> BEEP["double-beep confirm"]
-    BEEP --> CAP["GET /capture from CAM → base64"]
+    BEEP --> CAP["GET /capture from CAM →<br/>base64 straight into POST body"]
     CAP --> POST["POST /api/incidents<br/>speed · limit · doppler_hz · confirmed · photo_b64"]
     POST --> UP{"201 ?"}
     UP -- "yes" --> OK["uploaded"]
@@ -56,8 +56,8 @@ flowchart LR
     WIFJ --> PRINT["print IP on serial"]
     PRINT --> SERVE{"request ?"}
     SERVE -- "GET /capture" --> CAP["grab frame → save JPEG to microSD → return JPEG"]
-    SERVE -- "GET /stream" --> STR["MJPEG loop: grab → send → repeat"]
-    SERVE -- "GET /" --> STAT["status JSON<br/>(cam-status health target)"]
+    SERVE -- "GET /stream" --> STR["single frame, no SD write<br/>(dashboard re-polls ~1/s)"]
+    SERVE -- "GET /" --> STAT["cheap status page, no frame grab<br/>(cam-status just needs the HTTP 200)"]
 ```
 
 ## 4. Server-Side Incident Pipeline
@@ -68,15 +68,13 @@ flowchart TB
     VAL --> INS["INSERT row: speed · limit · doppler_hz<br/>confirmed · detected_at = now (server clock)"]
     INS --> PHOTO{"photo attached ?"}
     PHOTO -- "no" --> R201["return 201 {id, plate_text: null}"]
-    PHOTO -- "yes" --> FAST{"recognition<br/>finishes ≤ 5 s ?"}
-    FAST -- "yes — inline" --> OCR["plate recognition:<br/>OpenALPR (alpr -c ph) →<br/>fallback: OpenCV preprocess + pytesseract PSM 7"]
-    FAST -- "no" --> BG["queue in background thread"]
-    BG --> OCR
+    PHOTO -- "yes" --> BG["background OCR thread<br/>(hub answered with 201 immediately)"]
+    BG --> OCR["plate recognition:<br/>OpenCV preprocess (gray → bilateral → Canny)<br/>→ pytesseract PSM 7"]
     OCR --> UPD["UPDATE plate_text · plate_confidence"]
     UPD --> R201
 ```
 
-- Recognition runs inline if it finishes within 5 s, else queued in a background thread — the hub is never blocked waiting on OCR.
+- Recognition always runs in a background thread — the hub is answered 201 immediately; the row's plate fields fill in when OCR completes.
 - Nightly OCR retry pass fills in plates for photos that were too dark.
 
 ## 5. Dashboard Session (SSU personnel)
@@ -87,7 +85,7 @@ flowchart LR
     LIST --> FILTER["filter: All / New only / Reviewed"]
     FILTER --> CONF["filter: confirmed only<br/>(radar + beam agree)"]
     CONF --> ROW["click row → GET /api/incidents/id/photo<br/>→ photo pane"]
-    ROW --> LIVE["live lane: img src = http://CAM_IP/stream<br/>(direct from CAM)"]
+    ROW --> LIVE["live lane: img polls http://CAM_IP/stream<br/>direct from CAM, ~1 frame/s"]
     LIVE --> REVIEW["review → PATCH /api/incidents/id<br/>{reviewed: 1}"]
     REVIEW --> CAMS["cam-status badge → GET /api/cam-status<br/>(server probes CAM)"]
 ```

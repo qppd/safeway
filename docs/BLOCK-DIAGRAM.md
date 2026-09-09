@@ -17,13 +17,13 @@ flowchart TB
         RADAR["CDM324 24 GHz<br/>Doppler radar"]
         BUZZ["Active buzzer 5 V"]
         HUB["ESP32 38-pin HUB<br/>pulse ISR — GPIO 34<br/>beam ISR + 50 ms debounce — GPIO 25<br/>buzzer — GPIO 27<br/>event logic · Hz→km/h · WiFi"]
-        CAM["ESP32-CAM (OV2640) on MB board<br/>/capture JPEG + microSD save<br/>/stream live MJPEG<br/>microSD 16 GB failover"]
+        CAM["ESP32-CAM (OV2640) on MB board<br/>/capture JPEG + microSD save<br/>/stream polled live frame<br/>microSD 16 GB failover"]
         P1["Adapter #1 · 5 V 2 A"]
         P2["Adapter #2 · 5 V 2 A"]
     end
 
     subgraph SRV["SERVER — one process"]
-        API["FastAPI + uvicorn :8000<br/>SQLite safeway.db · uploads/<br/>plate recognition (OpenALPR / Tesseract)"]
+        API["FastAPI + uvicorn :8000<br/>SQLite safeway.db · uploads/<br/>plate recognition (OpenCV + Tesseract)"]
     end
 
     subgraph SSU["SSU BROWSER"]
@@ -36,7 +36,7 @@ flowchart TB
     HUB -- "GPIO 27" --> BUZZ
     HUB -- "① GET /capture — fetch photo" --> CAM
     HUB -- "② POST /api/incidents — JSON" --> API
-    CAM -. "③ MJPEG direct — img tag" .-> DASH
+    CAM -. "③ polled frame — img tag, ~1/s" .-> DASH
     API -- "④ GET incidents + photos" --> DASH
     P1 -.-> HUB
     P1 -.-> RADAR

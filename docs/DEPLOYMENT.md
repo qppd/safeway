@@ -49,7 +49,7 @@ Criteria for the pilot lane — walk candidates with SSU:
 ### 3.2 Verify, then leave
 
 1. Power up → serial (laptop at the pole) shows WiFi + `SafeWay HUB ready` + `CAM ready`.
-2. Browser check: `/stream` live from a phone on campus WiFi.
+2. Browser check: `/stream` returns a fresh frame from a phone on campus WiFi.
 3. Marshal 3–5 drive-pasts at mixed speeds → all appear on dashboard with photos + live feed works.
 4. Verify `confirmed=✓` on at least one drive-past (break-beam agreeing with radar).
 5. Physically tug-test every mount and cable.
@@ -60,7 +60,7 @@ Criteria for the pilot lane — walk candidates with SSU:
 - **If site WiFi is flaky:** photos still save to the CAM's microSD — the incident isn't lost, just late to the cloud. The hub retries on next event; during maintenance, pull the card to reconcile ([TESTING.md §4](TESTING.md#4-reliability--soak-test) taught the CAM crash drill — same recovery here).
 - **SSU should know: dashboard blank ≠ system dead.** Check the buzzer on a drive-past; if it sounds, the hub is alive and photos are on SD.
 - **CAM-only failure:** live feed grays out (`cam-status` shows offline), but speed logging continues — the hub just can't fetch a photo. Fix on the next maintenance window.
-- **Hub-only failure:** live feed keeps working (CAM serves the stream independently) — SSU sees the lane but no new records. Buzzer silent on drive-pasts = hub is the issue.
+- **Hub-only failure:** live feed keeps working (CAM serves frames independently) — SSU sees the lane but no new records. Buzzer silent on drive-pasts = hub is the issue.
 
 ## 5. SSU Handover & Training (Operate)
 

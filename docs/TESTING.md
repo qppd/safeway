@@ -16,7 +16,7 @@ Run in order — each gates the next. With two boards, several tests are per-boa
 | B2 | Radar IF verification | [HARDWARE.md §3](HARDWARE.md#3-if-signal-verification-do-this-first) — hand-wave gives 100–2,000 Hz waveform on serial; idle is flat |
 | B3 | Hub boot | No boot loop; `SafeWay HUB ready` in serial monitor |
 | B4 | CAM boot | `CAM ready at http://<ip>` printed; `/capture` returns a JPEG in a browser |
-| B5 | Live stream | `/stream` animates in a browser on the same WiFi |
+| B5 | Live frame | `/stream` returns a JPEG in a browser; the dashboard's live pane refreshes ~1/s |
 | B6 | Break-beam sanity | Block the beam with a book at ~1 m → hub prints `BEAM BROKEN`; remove → intact; boot line shows beam state |
 | B7 | Buzzer | Sounds while speed > limit during an event; silent otherwise |
 | B8 | WiFi + API | `POST /api/incidents` returns 201 on a simulated violation |
@@ -67,7 +67,7 @@ The measurement chain is: **Doppler Hz ÷ 44.7 = km/h** (+ cosine correction). C
 
 ## 3. Response Time
 
-- Radar detects overspeed → buzzer: < 100 ms (same loop cycle as detection).
+- Radar detects overspeed → buzzer ON: ≤ ~400 ms worst case (a reading only exists at each 300 ms window close — the window is the resolution).
 - Event close (lane clear + 1.5 s) → record visible in dashboard: stopwatch 5 runs; POC target **≤ 10 s** (photo fetch + base64 + upload dominate; sub-5 s on campus LAN).
 - Log both in the template below.
 

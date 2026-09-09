@@ -13,9 +13,9 @@ The server side of SafeWay: a REST API that receives violation incidents from th
 | API | **FastAPI** (Python 3.11) | Async, automatic OpenAPI docs, multipart/JSON photo handling |
 | Database | **SQLite** (file) → upgrade path: PostgreSQL | Zero-config for POC; schema ports cleanly |
 | Photos | Local `uploads/` dir, path stored in DB | Simple; swap for S3-compatible storage later |
-| Plate recognition | **OpenALPR** or `openalpr` bindings / OpenCV + Tesseract | Runs on captured photos (server-side, not on the ESP32) |
+| Plate recognition | **OpenCV + pytesseract** (default) / OpenALPR (optional upgrade — upstream has no `ph` region) | Runs on captured photos (server-side, not on the ESP32) |
 | Dashboard | FastAPI-served HTML + **Tailwind** + vanilla JS (fetch) | Single process to deploy; no separate frontend build |
-| Live feed | `<img>` tag hitting the CAM's `/stream` directly | No server relay needed — browser pulls MJPEG from the CAM over the same network |
+| Live feed | `<img>` polling the CAM's `/stream` (~1 frame/s) | No server relay needed — browser pulls frames from the CAM over the same network |
 
 Everything runs in one process you can host on a laptop, a campus server, or a small VPS.
 
@@ -25,8 +25,7 @@ Everything runs in one process you can host on a laptop, a campus server, or a s
 
 ```
 server/
-├── main.py            # FastAPI app + routes
-├── database.py        # SQLite schema + connection
+├── main.py            # FastAPI app + routes + schema + db
 ├── plates.py          # plate recognition pipeline
 ├── requirements.txt
 ├── uploads/           # captured photos (jpg)
@@ -80,7 +79,7 @@ Body: `application/json`
 | `photo_b64` | string | base64 JPEG (optional — the CAM's microSD has the backup) |
 
 **201** → `{ "id": 42, "plate_text": null }`
-Plate recognition runs inline if ≤ 5 s, else queued (background thread) and the record is updated.
+Plate recognition runs in a **background thread** (the hub is answered immediately); the record's plate fields update when OCR completes.
 
 ### GET `/api/incidents?limit=50&reviewed=false&confirmed=true` — list for dashboard
 
@@ -127,8 +126,25 @@ def db() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     return conn
 
-with db() as c:  # init schema on boot
-    c.executescript(open("schema.sql").read())
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS incidents (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id     TEXT NOT NULL,
+    detected_at   TEXT NOT NULL,          -- ISO 8601, server-received time
+    speed_kph     REAL NOT NULL,          -- peak speed during the event
+    limit_kph     REAL NOT NULL,
+    doppler_hz    REAL,                   -- raw Doppler frequency at peak (audit/evidence)
+    confirmed     INTEGER DEFAULT 0,      -- 1 = laser break-beam broke during the event
+    photo_path    TEXT,                   -- uploads/sw_1234.jpg
+    plate_text    TEXT,                   -- from recognition (nullable until processed)
+    plate_confidence REAL,
+    reviewed      INTEGER DEFAULT 0       -- 0 = new, 1 = acknowledged by SSU
+);
+CREATE INDEX IF NOT EXISTS idx_incidents_time ON incidents(detected_at DESC);
+"""
+
+with db() as c:  # init schema on boot (same SQL as section 1)
+    c.executescript(SCHEMA)
 
 @app.post("/api/incidents", status_code=201)
 def create_incident(inc: Incident):
@@ -217,26 +233,10 @@ Run: `uvicorn main:app --host 0.0.0.0 --port 8000`
 
 ## 4. Plate Recognition (plates.py)
 
-Two supported paths — try OpenALPR first:
+The runnable default is pure Python — OpenCV preprocess + Tesseract. OpenALPR is the optional upgrade path, not the default: its agent ships region configs for `us eu au br in kr vn` only — **there is no `ph` region** (`alpr -c ph` errors with "Invalid country") — and the project has been unmaintained since 2018. Real PH-plate ANPR means training a custom region or a cloud service; that's the production upgrade, not the POC.
 
 ```python
-# Path A: OpenALPR agent installed on server
-#   (agent reads file -> prints: plate,confidence)
-import subprocess
-
-def recognize(path: str) -> tuple[str | None, float]:
-    out = subprocess.run(
-        ["alpr", "-c", "ph", path],          # '-c ph' region config
-        capture_output=True, text=True, timeout=20
-    ).stdout.strip().splitlines()
-    if not out: return None, 0.0
-    # first line:  -  ABC1234    91.3% confidence
-    parts = out[0].split()
-    return parts[1], float(parts[2].rstrip("%")) / 100.0
-```
-
-```python
-# Path B: pure-Python fallback (pytesseract + OpenCV preprocess)
+# Path A (default): pytesseract + OpenCV preprocess
 #   pip install pytesseract opencv-python
 import cv2, pytesseract, re
 
@@ -250,6 +250,22 @@ def recognize(path: str) -> tuple[str | None, float]:
     ).strip()
     m = re.search(r"[A-Z0-9]{5,8}", text.upper())
     return (m.group(0), 0.5) if m else (None, 0.0)
+```
+
+```python
+# Path B (optional upgrade): OpenALPR agent — only if you train & install a
+# PH region config first (upstream regions: us eu au br in kr vn — no 'ph').
+import subprocess
+
+def recognize(path: str) -> tuple[str | None, float]:
+    out = subprocess.run(
+        ["alpr", "-c", "ph", path],          # requires your own trained region
+        capture_output=True, text=True, timeout=20
+    ).stdout.strip().splitlines()
+    if not out: return None, 0.0
+    # first line:  -  ABC1234    91.3% confidence
+    parts = out[0].split()
+    return parts[1], float(parts[2].rstrip("%")) / 100.0
 ```
 
 > PH plates: 3 letters + 4 digits (private) or LLL-DDDD variants (motor). The regex/whitelist handles both. Low light = garbage OCR — the fix is lighting, not code (see [FIRMWARE.md](FIRMWARE.md) tuning).
@@ -301,7 +317,11 @@ Table of recent incidents + photo pane + **live lane feed** from the CAM + filte
 
 <script>
 const CAM_IP = "192.168.1.45";           // same as server config
-document.getElementById('live').src = `http://${CAM_IP}:80/stream`;
+const esc = s => (s ?? '—').replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const live = document.getElementById('live');
+function refreshLive() { live.src = `http://${CAM_IP}/stream?ts=${Date.now()}`; }  // cache-busted poll
+refreshLive(); setInterval(refreshLive, 1200);   // pseudo-live ~1 frame/s
 
 async function load() {
   const f = document.getElementById('filter').value;
@@ -318,7 +338,7 @@ async function load() {
         ${i.speed_kph.toFixed(1)} km/h</td>
       <td class="text-center text-slate-500 font-mono">${i.doppler_hz ? Math.round(i.doppler_hz) + ' Hz' : '—'}</td>
       <td class="text-center">${i.confirmed ? '✓' : '—'}</td>
-      <td class="text-center font-mono">${i.plate_text ?? '—'}</td>
+      <td class="text-center font-mono">${esc(i.plate_text)}</td>
       <td class="text-center">${i.reviewed ? 'Reviewed' : 'New'}</td>
       <td><button onclick="show(${i.id})" class="text-blue-600 underline">view</button></td>
     </tr>`).join('');
@@ -341,7 +361,7 @@ load(); setInterval(load, 15000);   // auto-refresh 15 s
 
 SSU workflow: watch the **live pane** for context → violation rows arrive automatically → click *view* → photo opens, incident marked reviewed. The **Doppler Hz column + Conf. ✓** column give the evidence trail for reports.
 
-> The dashboard must run on the **same network** as the CAM for the live feed (browser pulls `http://<cam-ip>/stream` directly). Over VPN this works too; over public internet you'd need a relay — out of POC scope.
+> The dashboard must run on the **same network** as the CAM for the live feed (browser polls `http://<cam-ip>/stream` — one JPEG per request). Over VPN this works too; over public internet you'd need a relay — out of POC scope.
 
 ---
 
