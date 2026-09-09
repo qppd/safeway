@@ -18,7 +18,7 @@ Wiring, power, and enclosure build for the SafeWay prototype (two-board architec
 
 ## 1. System Overview
 
-A single pole-mounted unit watches the lane. The **CDM324 24 GHz Doppler radar** measures vehicle speed directly from the Doppler frequency shift; the **ESP32-CAM** (on its MB programmer board) photographs the vehicle and serves a live stream; the **ESP32 38-pin hub** counts Doppler pulses, watches the **laser break-beam** (KY-008 transmitter on a far post, receiver module on the hub pole — a vehicle crossing the lane breaks the beam), sounds the buzzer on overspeed, fetches the photo from the CAM, and logs the incident to the cloud API. No data cables across the road — just one thin 2-wire power run to the far-post laser.
+A single pole-mounted unit watches the lane. The **CDM324 24 GHz Doppler radar** measures vehicle speed directly from the Doppler frequency shift; the **ESP32-S3 WROOM N16R8 CAM board** (OV5640) photographs the vehicle and serves a live stream; the **ESP32 38-pin hub** counts Doppler pulses, watches the **laser break-beam** (KY-008 transmitter on a far post, receiver module on the hub pole — a vehicle crossing the lane breaks the beam), sounds the buzzer on overspeed, fetches the photo from the CAM, and logs the incident to the cloud API. No data cables across the road — just one thin 2-wire power run to the far-post laser.
 
 ```
         Road lane  ────────────────────► direction of travel
@@ -32,8 +32,8 @@ A single pole-mounted unit watches the lane. The **CDM324 24 GHz Doppler radar**
   │                                     ├── Laser receiver DO ── GPIO 25
   │                                     ├── Buzzer ── GPIO 27
   │                                     └── WiFi ── fetches CAM photo, POSTs to API
-  │                                     ESP32-CAM-MB
-  │                                     ├── OV2640 /capture  (violation snapshot)
+  │                                     ESP32-S3 WROOM CAM
+  │                                     ├── OV5640 /capture  (violation snapshot)
   │                                     ├── /stream  (polled live frame for dashboard)
   │                                     └── microSD: local backup of every photo
   └────────────────────┬────────────────────────────────┘
@@ -50,7 +50,7 @@ f_doppler (Hz) = 44.7 × speed (km/h)
 
 A car at 30 km/h → ~1,341 Hz on the OUT pin. The hub counts pulses over a window and divides — that's the whole speed measurement chain.
 
-**Why two boards:** the classic single-board ESP32-CAM starves pins (camera + SD leaves ~2 usable GPIOs — no room for radar, break-beam, buzzer). Splitting duties gives the sensors a full 38-pin board and the camera a dedicated board — each simpler to code, flash, and debug; and a camera reboot (heap fragmentation etc.) can never disturb a speed measurement in progress.
+**Why two boards:** the classic single-board ESP32-CAM starves pins (camera + SD leaves ~2 usable GPIOs — no room for radar, break-beam, buzzer). The new ESP32-S3 camera board has GPIOs to spare, but the split stays: radar pulse-counting never competes with camera DMA for the same core, and a camera reboot (heap fragmentation etc.) can never disturb a speed measurement in progress. Each board is simpler to code, flash, and debug on its own.
 
 ---
 
@@ -90,15 +90,17 @@ Standard DOIT DevKit v1-compatible 38-pin board (CP2102, Type-C or micro-USB). A
 - **Laser receiver on GPIO 25 (has internal pull-ups):** the receiver's open-comparator DO idles at a defined level with `INPUT_PULLUP` enabled — no external resistor needed.
 - Interrupt load is trivial: the radar ISR is a single increment (≤ ~4,470 pulses/s at 100 km/h); the beam ISR fires only on state changes (a car passes = 2 edges), debounced in software.
 
-### 2.2 ESP32-CAM-MB (camera board)
+### 2.2 ESP32-S3 WROOM N16R8 CAM (camera board)
 
-AI-Thinker-style ESP32-CAM seated on the **MB programmer base board**. The MB board adds: CH340 USB-serial (flash from USB directly — no FTDI, no IO0-to-GND jumper), 5 V power jack, and reset/boot buttons that actually reach the CAM's tiny pads.
+Standalone ESP32-S3-WROOM-1 **N16R8** board (16 MB flash, 8 MB octal PSRAM) with the **OV5640 5 MP camera** on a 24-pin DVP FPC header and an **onboard microSD slot**. No programmer board, no FTDI, no IO0 jumper — two Type-C ports (one CH343P USB-serial for flashing, one native USB-OTG).
 
-**Camera board pin facts:**
-- The OV2640 and microSD share GPIOs 0, 5, 13–15 (camera + SD keep ~4 GPIOs busy — that's exactly why it does nothing else).
-- Its own pins are all spoken for: **power it, aim it, flash it** — the hub never wires to it.
+**Camera board pin facts** (from the board's pinout diagram, cross-checked against the xiaozhi-esp32 `bread-compact-wifi-s3cam` config — 14/14 camera pins match):
+- Camera DVP bus: Y2–Y9 = GPIO 11, 9, 8, 10, 12, 18, 17, 16 · XCLK 15 · PCLK 13 · VSYNC 6 · HREF 7 · SIOD 4 · SIOC 5 · PWDN/RESET not wired.
+- microSD (1-bit SD_MMC): CLK = GPIO 39 · CMD = GPIO 38 · D0 = GPIO 40.
+- The 24-pin header accepts OV2640/OV7725/OV3660/OV5640 — OV5640 is the fitted 5 MP unit.
+- Still dedicated in this project: **power it, aim it, flash it** — the hub never wires to it. Spare GPIOs (19, 20, 21, 35–37, 45, 48…) stay free for future on-board peripherals.
 
-> **ESP32-CAM + MB compatible-pin note:** the MB board routes the CAM's edge pins (5V, GND, 13, 14, 15) to its own header — meaning if you ever want an emergency fallback (CAM down), the hub could theoretically bit-bang through those. Not used in this project — boards talk over WiFi only.
+> **3.3 V logic only:** the ESP32-S3 GPIOs are **not 5 V tolerant** (unlike the classic WROOM-32 hub, which survives it). Never feed 5 V into any S3 pin — including its camera/SD lines.
 
 ---
 
@@ -151,9 +153,9 @@ Before enclosure or firmware, verify what your radar module's OUT pin actually o
 | Board | PC |
 |---|---|
 | ESP32 38-pin USB | USB cable |
-| ESP32-CAM-MB USB | USB cable |
+| ESP32-S3 CAM USB-C (either port) | USB cable |
 
-Each board flashes itself over its own USB. The CAM-MB's CH340 does the flash dance for you — no IO0 jumper. (Driver notes in [FIRMWARE.md](FIRMWARE.md).)
+Each board flashes itself over its own USB. The CAM board's CH343P does the flash dance for you — no IO0 jumper. (Driver + Arduino board-settings notes in [FIRMWARE.md](FIRMWARE.md).)
 
 ### 5.2 Main wiring — 38-pin hub + far post
 
@@ -183,9 +185,9 @@ Each board flashes itself over its own USB. The CAM-MB's CH340 does the flash da
 
 | Module | Pin | Connect to |
 |---|---|---|
-| ESP32-CAM-MB | USB (or 5V jack) | its own 5V adapter |
-| | microSD | 16 GB FAT32, inserted before power |
-| OV2640 camera | built-in ribbon | aimed at the trigger zone |
+| ESP32-S3 WROOM CAM | Type-C USB (either port) or 5V/VIN pin | its own 5V adapter |
+| | microSD (onboard slot) | 16 GB FAT32, inserted before power |
+| OV5640 camera | 24-pin FPC header (fitted) | aimed at the trigger zone |
 | (no other wiring — ever) | | |
 
 ### 5.4 Power design
@@ -193,7 +195,7 @@ Each board flashes itself over its own USB. The CAM-MB's CH340 does the flash da
 ```
  Adapter #1 (5V 2A)                       Adapter #2 (5V 2A)
         │                                       │
-   38-pin HUB                               ESP32-CAM-MB
+   38-pin HUB                               ESP32-S3 WROOM CAM
    ├── CDM324 (5V, ~30–60 mA)                    └── (board's onboard reg makes 3.3V)
    ├── Laser receiver (5V, ~5 mA)
    ├── Buzzer (GPIO-driven)
@@ -218,13 +220,13 @@ Each board flashes itself over its own USB. The CAM-MB's CH340 does the flash da
 
 ## 7. Enclosure Assembly (IP68 ABS, 200x100x70 mm)
 
-1. **Layout:** 830-point breadboard + 38-pin board (hub) on one side; CAM-MB on the other; radar module centered behind the front wall; terminal strip for power in/out.
+1. **Layout:** 830-point breadboard + 38-pin board (hub) on one side; ESP32-S3 CAM board on the other; radar module centered behind the front wall; terminal strip for power in/out.
 2. **Radar mounting:** 24 GHz passes through **ABS plastic** (not metal). Mount the CDM324 **inside** the sealed box facing out through the plastic wall — zero apertures for rain. Antenna face within ~2 cm of the wall.
    - Never put metal (screws, brackets, foil) between radar and road.
 3. **Laser receiver placement:** mount it inside the enclosure behind a small clear window (drill ~10–12 mm, seal with silicone or a glue-lined washer) — the photodetector just needs to see the far-post dot. Aim the window at the **beam axis** (straight across the lane).
 4. **Far-post KY-008 TX:** in its own small weatherproof housing (or tucked under the post cap), dot aimed at the receiver window. The 22AWG run leaves the hub enclosure through a cable gland, follows the curb/ground, and enters the far post's housing — UV ties every 30 cm; conduit sleeve where cars might roll over it.
 5. **Buzzer:** small drilled port (8 mm) covered with tape.
-6. **Camera window:** large cutout + clear acrylic/PETG sealed with silicone. OV2640 must see the lane at plate height.
+6. **Camera window:** large cutout + clear acrylic/PETG sealed with silicone. OV5640 must see the lane at plate height.
 7. **Cable glands:** one for DC power in, one for the far-post laser run, one spare for future sensor. Glue-lined heat shrink.
 8. **Desiccant pack** inside — tropical humidity fogs lenses.
 9. Breadboard sticks down with double-sided foam tape (removable for iteration).

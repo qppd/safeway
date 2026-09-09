@@ -143,7 +143,7 @@ Longest outage: ____ min   SD photos present: Y/N   CAM power-cycle recovery: Y/
 | Phantom events with no vehicle | Branches/banners in beam cone; `MIN_SPEED_KPH` too low | Clear the beam corridor; raise the noise floor |
 | `confirmed` never true | Beam mis-aimed / DO divider missing / `BEAM_BREAKS_LOW` polarity wrong | Re-align far post; check §5.2 level; flip the polarity constant |
 | Hub can't fetch photo | CAM IP changed (DHCP) | Set DHCP reservation; update `CAM_IP` |
-| Photos dark/blurry at night | OV2640 gain maxed, plate unreadable | Add lane lighting (Optimize phase); OCR retries nightly |
+| Photos dark/blurry at night | OV5640 gain maxed, plate unreadable | Add lane lighting (Optimize phase); OCR retries nightly |
 | OCR < 50% accuracy | Photo angle/distance wrong for plate size | Camera closer to plate height; capture at trigger zone |
 | Dashboard misses records | Upload timeout on big photos | Lower CAM `frame_size` to VGA, or serve on campus LAN |
 | CAM stream freezes | CAM heap fragmentation after days | CAM reboots nightly (add `ESP.restart()` at 02:00 in CAM sketch) |

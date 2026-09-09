@@ -17,7 +17,7 @@ flowchart TB
         RADAR["CDM324 24 GHz<br/>Doppler radar"]
         BUZZ["Active buzzer 5 V"]
         HUB["ESP32 38-pin HUB<br/>pulse ISR — GPIO 34<br/>beam ISR + 50 ms debounce — GPIO 25<br/>buzzer — GPIO 27<br/>event logic · Hz→km/h · WiFi"]
-        CAM["ESP32-CAM (OV2640) on MB board<br/>/capture JPEG + microSD save<br/>/stream polled live frame<br/>microSD 16 GB failover"]
+        CAM["ESP32-S3 WROOM CAM (OV5640)<br/>/capture JPEG + microSD save<br/>/stream polled live frame<br/>microSD 16 GB failover"]
         P1["Adapter #1 · 5 V 2 A"]
         P2["Adapter #2 · 5 V 2 A"]
     end
@@ -62,7 +62,7 @@ flowchart LR
     A1 --> RRV["CDM324 VCC<br/>~30–60 mA"]
     A1 --> LRV["Laser receiver VCC<br/>~10 mA"]
     A1 --> WIRE["22AWG 2-core run<br/>10 m"] --> TXV["Far-post KY-008 TX<br/>under 30 mA"]
-    A2["Adapter #2 · 5 V 2 A"] --> CAMV["ESP32-CAM-MB 5 V<br/>board + OV2640 + WiFi + SD"]
+    A2["Adapter #2 · 5 V 2 A"] --> CAMV["ESP32-S3 WROOM CAM 5 V<br/>board + OV5640 + WiFi + SD"]
 ```
 
 - Separate adapters ⇒ a camera reboot can never brown-out the radar mid-measurement.

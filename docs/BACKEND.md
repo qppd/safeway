@@ -110,7 +110,7 @@ from pydantic import BaseModel
 app = FastAPI(title="SafeWay API", version="0.2.0")
 DB = "safeway.db"
 UPLOADS = "uploads"
-CAM_IP = "192.168.1.45"          # ESP32-CAM address (DHCP-reserved)
+CAM_IP = "192.168.1.45"          # ESP32-S3 CAM address (DHCP-reserved)
 os.makedirs(UPLOADS, exist_ok=True)
 
 class Incident(BaseModel):

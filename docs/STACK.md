@@ -11,8 +11,8 @@ Everything SafeWay is built on — deliberately small, POC-friendly, and free.
 | IDE | **Arduino IDE 2.x** | One IDE for both boards — https://arduino.cc/en/software |
 | Toolchain | **esp32 by Espressif Systems** (Arduino core v2.x+) | Board Manager URL: `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json` |
 | Board (hub) | **ESP32 Dev Module** (38-pin, CP2102 USB-UART) | Sensor hub sketch `safeway-hub` — radar pulse counting, break-beam ISR, buzzer, upload |
-| Board (camera) | **AI Thinker ESP32-CAM** on MB programmer (CH340) | Camera sketch `safeway-cam` — `/capture` JPEG, `/stream` polled live frame, microSD backup |
-| Drivers | CP2102 (Silabs VCP) · CH340 (WCH) | Only if the COM port doesn't appear |
+| Board (camera) | **ESP32S3 Dev Module** (ESP32-S3 WROOM N16R8 CAM; CH343P USB-UART + native USB-OTG) | Camera sketch `safeway-cam` — `/capture` JPEG, `/stream` polled live frame, microSD backup. IDE: Flash 16MB · PSRAM: OPI PSRAM |
+| Drivers | CP2102 (Silabs VCP) · CH343 (WCH) | Only if the COM port doesn't appear |
 | Libraries | WiFi · HTTPClient · base64 · SD_MMC *(bundled with core)* + **ArduinoJson** (Benoit Blanchon, via Library Manager) | Nothing else to install |
 
 ## Backend (server)
@@ -45,7 +45,7 @@ Everything SafeWay is built on — deliberately small, POC-friendly, and free.
 | CDM324 24 GHz Doppler radar | Speed measurement (Doppler IF = 44.7 Hz per km/h) |
 | KY-008 laser TX + photodetector receiver | Break-beam presence confirmation across the lane |
 | ESP32 38-pin dev board | Sensor hub (radar GPIO 34, beam GPIO 25, buzzer GPIO 27) |
-| ESP32-CAM (OV2640) + MB programmer | Photo evidence, live stream, microSD failover |
+| ESP32-S3 WROOM N16R8 CAM (OV5640) | Photo evidence, live stream, microSD failover |
 
 ---
 

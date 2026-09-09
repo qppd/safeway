@@ -11,8 +11,8 @@ flowchart TB
     L5["L5 · PRESENTATION<br/>SSU browser: dashboard.html — Tailwind + vanilla JS<br/>table · photo pane · live feed"]
     L4["L4 · APPLICATION<br/>FastAPI :8000 — POST/GET/PATCH incidents<br/>photo serve · cam-status · dashboard hosting"]
     L3["L3 · DATA &amp; INTELLIGENCE<br/>SQLite (incidents) · uploads/ store<br/>plate recognition (OpenCV + Tesseract)"]
-    L2["L2 · EDGE DEVICES<br/>ESP32 hub: sensing + event logic + reporting<br/>ESP32-CAM: evidence + stream"]
-    L1["L1 · SENSING &amp; PHYSICS<br/>CDM324 Doppler radar · KY-008 + receiver break-beam<br/>OV2640 imager · buzzer"]
+    L2["L2 · EDGE DEVICES<br/>ESP32 hub: sensing + event logic + reporting<br/>ESP32-S3 CAM: evidence + stream"]
+    L1["L1 · SENSING &amp; PHYSICS<br/>CDM324 Doppler radar · KY-008 + receiver break-beam<br/>OV5640 imager · buzzer"]
     L1 -- "GPIO electrical" --> L2
     L2 -- "WiFi HTTP" --> L4
     L4 -- "HTTP / HTML" --> L5
@@ -22,7 +22,7 @@ flowchart TB
 **Key boundary decisions:**
 
 - **Sensing on the edge, intelligence on the server.** The hub does physics (Hz→km/h), thresholding, and event assembly — everything that must happen in real time. The server does OCR and storage — everything that can wait. A 300 ms loop on the hub never competes with plate recognition on the server.
-- **Two boards, one job each.** Camera + SD consumes an ESP32-CAM's pins and heap; splitting sensors from imaging means a camera crash can't take down speed measurement (and vice versa). L2 is deliberately two independent fault domains.
+- **Two boards, one job each.** The ESP32-S3 camera board has pins and PSRAM to spare, but the split stays: sensors and imaging in separate fault domains means a camera crash can't take down speed measurement (and vice versa).
 - **Evidence has two paths.** Photo goes hub→server immediately when WiFi is up; microSD on the CAM is the durable copy either way. The system degrades gracefully, never loses evidence.
 
 ## 2. Component Responsibilities
@@ -32,7 +32,7 @@ flowchart TB
 | CDM324 radar | IF pulse generation (44.7 Hz/km/h) | — |
 | Break-beam pair | presence edge across the lane | speed (radar's job) |
 | ESP32 hub | pulse counting, beam ISR+debounce, Hz→km/h, cosine correction, peak-hold, buzzer, photo fetch, incident POST | OCR, long-term storage |
-| ESP32-CAM | capture on demand, polled live frame, microSD save | speed logic, upload |
+| ESP32-S3 CAM | capture on demand, polled live frame, microSD save | speed logic, upload |
 | FastAPI server | validation, server-side timestamps, photo storage, OCR orchestration, dashboard hosting | sensing decisions |
 | Dashboard | read, filter, review, view live feed | write raw records (only PATCH review) |
 
@@ -53,7 +53,7 @@ flowchart TB
 ```mermaid
 flowchart LR
     HUB["ESP32 hub"] --> AP["Campus WiFi AP<br/>2.4 GHz — one subnet"]
-    CAMB["ESP32-CAM"] --> AP
+    CAMB["ESP32-S3 CAM"] --> AP
     AP --> SRV["Server<br/>uvicorn :8000<br/>DHCP-reserved"]
     AP --> SSUB["SSU browsers<br/>LAN / campus network"]
 ```

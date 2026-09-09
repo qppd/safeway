@@ -6,7 +6,7 @@ Two independent sketches, one per board. Each flashes over its own USB port.
 
 | Sketch | Board | Job |
 |---|---|---|
-| `safeway-cam` | ESP32-CAM-MB | photo server: `/capture` (JPEG) + `/stream` (polled live frame) + SD backup |
+| `safeway-cam` | ESP32-S3 WROOM N16R8 CAM | photo server: `/capture` (JPEG) + `/stream` (polled live frame) + SD backup |
 | `safeway-hub` | ESP32 38-pin | Doppler speed + break-beam confirm + buzzer + fetch photo + upload to API |
 
 ---
@@ -20,9 +20,9 @@ Two independent sketches, one per board. Each flashes over its own USB port.
      https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
      ```
    - *Tools → Board → Boards Manager* → search **esp32** → install **esp32 by Espressif Systems** (v2.x+)
-3. Drivers (both are usually automatic on Windows 10/11):
+3. Drivers (all usually automatic on Windows 10/11):
    - **38-pin board:** CP2102 driver — https://www.silabs.com/developer-tools/usb-to-uart-bridge-vcp-drivers
-   - **CAM-MB board:** CH340 driver — https://www.wch-ic.com/downloads (only if the port doesn't appear)
+   - **CAM board:** CH343P USB-serial driver — https://www.wch-ic.com/downloads (only if the port doesn't appear; the board's second Type-C is native USB-OTG and needs no driver)
 4. No extra libraries needed — WiFi, HTTPClient, base64, SD_MMC ship with the ESP32 core.
 
 ---
@@ -32,7 +32,7 @@ Two independent sketches, one per board. Each flashes over its own USB port.
 Serves two still endpoints and a status page; every **violation capture** is saved to microSD as the local backup (live-view frames never touch the card).
 
 ```cpp
-/* safeway-cam — ESP32-CAM (AI-Thinker) on MB programmer board
+/* safeway-cam — ESP32-S3 WROOM N16R8 CAM board (DevKit N16R8 CAM family)
    Endpoints:  /capture  -> single JPEG (also saved to microSD)
                /stream   -> single JPEG frame, no SD write (dashboard polls ~1/s)
                /         -> tiny status page, no frame grab                    */
@@ -46,23 +46,26 @@ const char* WIFI_SSID = "Campus-WiFi";     // 2.4 GHz network!
 const char* WIFI_PASS = "********";
 // ----------------------------
 
-// AI-Thinker ESP32-CAM pin model
-#define PWDN_GPIO_NUM  32
+// ESP32-S3 DevKit N16R8 CAM pin model — verified from the board's pinout
+// diagram, cross-checked against the xiaozhi-esp32 bread-compact-wifi-s3cam
+// board config (14/14 pins match). PWDN/RESET are not wired on this board.
+// Confirm against the printed pinout card on first boot.
+#define PWDN_GPIO_NUM  -1
 #define RESET_GPIO_NUM -1
-#define XCLK_GPIO_NUM   0
-#define SIOD_GPIO_NUM  26
-#define SIOC_GPIO_NUM  27
-#define Y9_GPIO_NUM    35
-#define Y8_GPIO_NUM    34
-#define Y7_GPIO_NUM    39
-#define Y6_GPIO_NUM    36
-#define Y5_GPIO_NUM    21
-#define Y4_GPIO_NUM    19
-#define Y3_GPIO_NUM    18
-#define Y2_GPIO_NUM     5
-#define VSYNC_GPIO_NUM 25
-#define HREF_GPIO_NUM  23
-#define PCLK_GPIO_NUM  22
+#define XCLK_GPIO_NUM  15
+#define SIOD_GPIO_NUM   4    // SCCB SDA
+#define SIOC_GPIO_NUM   5    // SCCB SCL
+#define Y9_GPIO_NUM    16    // D7
+#define Y8_GPIO_NUM    17    // D6
+#define Y7_GPIO_NUM    18    // D5
+#define Y6_GPIO_NUM    12    // D4
+#define Y5_GPIO_NUM    10    // D3
+#define Y4_GPIO_NUM     8    // D2
+#define Y3_GPIO_NUM     9    // D1
+#define Y2_GPIO_NUM    11    // D0
+#define VSYNC_GPIO_NUM  6
+#define HREF_GPIO_NUM   7
+#define PCLK_GPIO_NUM  13
 
 WiFiServer server(80);
 int snapCount = 0;
@@ -84,8 +87,9 @@ bool camInit() {
   cc.frame_size   = FRAMESIZE_SVGA;      // 800x600 — plate-readable, small upload
   cc.jpeg_quality = 12;                   // lower = better, heavier
   cc.fb_count     = 2;                    // grab latest while serving the previous
-  cc.fb_location  = CAMERA_FB_IN_PSRAM;   // frames in PSRAM — internal heap stays free for WiFi
-  cc.grab_mode    = CAMERA_GRAB_LATEST;  // (no-PSRAM clone board? use FRAMESIZE_VGA, fb_count 1)
+  cc.fb_location  = CAMERA_FB_IN_PSRAM;   // 8 MB octal PSRAM — internal heap stays free for WiFi
+  cc.grab_mode    = CAMERA_GRAB_LATEST;  // OV5640 headroom: FRAMESIZE_HD works too —
+                                         // only if the hub heap tolerates the bigger base64 upload (§5)
   return esp_camera_init(&cc) == ESP_OK;
 }
 
@@ -98,6 +102,7 @@ void sdSave(camera_fb_t* fb) {
 void setup() {
   Serial.begin(115200);
   if (!camInit()) { Serial.println("CAMERA FAIL"); while (true) delay(100); }
+  SD_MMC.setPins(39, 38, 40);               // S3 GPIO-matrix SD: CLK=39, CMD=38, D0=40
   SD_MMC.begin("/sdcard", true);            // 1-bit mode: leaves GPIOs free
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   while (WiFi.status() != WL_CONNECTED) { delay(200); Serial.print("."); }
@@ -316,10 +321,12 @@ void loop() {
 1. USB cable → Tools → Board: **ESP32 Dev Module**
 2. Upload. Done — CP2102 handles reset/boot automatically.
 
-### 4.2 CAM board (on MB programmer)
-1. Seat the ESP32-CAM firmly on the MB board (edge connector, camera ribbon away from USB).
-2. USB cable → Tools → Board: **AI Thinker ESP32-CAM**
-3. Upload. **The MB board's auto-download circuit handles IO0** — no jumper needed. If the IDE can't find the board: hold the MB's **IO0/BOOT** button, click Upload, release when "Connecting..." appears.
+### 4.2 CAM board (ESP32-S3 WROOM N16R8 CAM)
+1. USB-C cable into **either port** — the USB-to-Serial (CH343P) port is the classic flash path; the USB-OTG port also works.
+2. Tools → Board: **ESP32S3 Dev Module**, then set the rest:
+   - **Flash Size: 16MB** · **PSRAM: OPI PSRAM** (N16R8 octal) · **USB Mode: Hardware CDC and JTAG**
+   - **USB CDC On Boot: Enabled** (required when flashing/monitoring via the USB-OTG port)
+3. Upload. The CH343P auto-download handles boot — no jumper needed. If the IDE can't find the board: hold **BOOT (IO0)**, click Upload, release when "Connecting..." appears.
 4. Serial Monitor at 115200 → note the **CAM IP address**.
 
 ### 4.3 Bench smoke test (before mounting anything)
