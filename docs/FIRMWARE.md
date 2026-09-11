@@ -6,8 +6,8 @@ Two independent sketches, one per board. Each flashes over its own USB port.
 
 | Sketch | Board | Job |
 |---|---|---|
-| `safeway-cam` | ESP32-S3 WROOM N16R8 CAM | photo server: `/capture` (JPEG) + `/stream` (polled live frame) + SD backup |
-| `safeway-hub` | ESP32 38-pin | Doppler speed + break-beam confirm + buzzer + beam-break photo snapshot + upload to API |
+| `safeway-cam` | ESP32-S3 WROOM N16R8 CAM | photo server: `/capture` (cached beam-moment JPEG) + `/stream` (polled live frame) + SD backup + **beam #2 self-trigger on GPIO 21** |
+| `safeway-hub` | ESP32 38-pin | Doppler speed + break-beam #1 confirm + buzzer + beam-break photo fetch + upload to API |
 
 ---
 
@@ -29,13 +29,16 @@ Two independent sketches, one per board. Each flashes over its own USB port.
 
 ## 2. Sketch 1 — `safeway-cam` (camera board)
 
-Serves two still endpoints and a status page; every **violation capture** is saved to microSD as the local backup (live-view frames never touch the card).
+Serves two still endpoints and a status page; watches **break-beam #2** on GPIO 21 — the instant the beam breaks, it grabs the plate frame itself (no waiting for the hub's HTTP request), saves it to microSD, and **caches it in PSRAM**; the hub's `/capture` fetch then returns the cached beam-moment frame instead of a fresh (possibly late) grab. Live-view frames never touch the card.
 
 ```cpp
 /* safeway-cam — ESP32-S3 WROOM N16R8 CAM board (DevKit N16R8 CAM family)
-   Endpoints:  /capture  -> single JPEG (also saved to microSD)
+   Endpoints:  /capture  -> cached beam-moment JPEG if fresh, else live grab
+                         (beam-moment captures also saved to microSD)
                /stream   -> single JPEG frame, no SD write (dashboard polls ~1/s)
-               /         -> tiny status page, no frame grab                    */
+               /         -> tiny status page, no frame grab
+   Beam #2:    receiver #2 DO -> GPIO 21 (CAM_BEAM_BREAKS_LOW polarity)
+               break -> immediate self-triggered snapshot, cached + SD saved  */
 
 #include "esp_camera.h"
 #include <WiFi.h>
@@ -44,7 +47,12 @@ Serves two still endpoints and a status page; every **violation capture** is sav
 // ---------- CONFIG ----------
 const char* WIFI_SSID = "Campus-WiFi";     // 2.4 GHz network!
 const char* WIFI_PASS = "********";
+const bool  CAM_BEAM_BREAKS_LOW = true;    // true: DO LOW = beam intact (most modules)
+                                           // set from the bench polarity check (HARDWARE §5.2)
+const uint32_t BEAM2_FRESH_MS = 8000;     // cached beam photo served this long after the break
 // ----------------------------
+
+#define PIN_BEAM2 21                        // laser receiver #2 DO (no camera/SD/strap role)
 
 // ESP32-S3 DevKit N16R8 CAM pin model — verified from the board's pinout
 // diagram, cross-checked against the xiaozhi-esp32 bread-compact-wifi-s3cam
@@ -70,6 +78,38 @@ const char* WIFI_PASS = "********";
 WiFiServer server(80);
 int snapCount = 0;
 
+// --- break-beam #2: self-triggered snapshot ---
+volatile uint32_t beam2EdgeMs = 0;
+volatile bool beam2SnapReq = false;         // loop: beam broke -> grab the plate frame NOW
+IRAM_ATTR void onBeam2Edge() {
+  uint32_t now = millis();
+  if (now - beam2EdgeMs < 50) return;      // debounce: ignore edges <50 ms apart
+  beam2EdgeMs = now;
+  bool level = digitalRead(PIN_BEAM2);
+  bool broken = CAM_BEAM_BREAKS_LOW ? (level == HIGH) : (level == LOW);
+  if (broken) beam2SnapReq = true;         // vehicle in frame RIGHT NOW
+}
+
+uint8_t* snapBuf = nullptr;                // cached beam-moment JPEG (PSRAM)
+size_t   snapLen = 0;
+uint32_t snapMs   = 0;                      // when it was captured
+
+void beamSnapshot() {                      // called from loop() on the flag
+  camera_fb_t* fb = esp_camera_fb_get();
+  if (!fb) return;
+  if (snapBuf) free(snapBuf);              // replace stale cache (PSRAM — no heap frag)
+  snapLen = fb->len;
+  snapBuf = (uint8_t*)ps_malloc(snapLen);
+  if (snapBuf) memcpy(snapBuf, fb->buf, snapLen);
+  snapMs = millis();
+  // SD save: the beam-moment capture IS the violation photo
+  String path = "/sw_" + String(millis()) + "_" + String(snapCount++) + ".jpg";
+  File f = SD_MMC.open(path, FILE_WRITE);
+  if (f) { f.write(fb->buf, fb->len); f.close(); }
+  esp_camera_fb_return(fb);
+  Serial.println("BEAM2 SNAP -> SD ok");
+}
+
 bool camInit() {
   camera_config_t cc = {};
   cc.ledc_channel = LEDC_CHANNEL_0;
@@ -93,17 +133,15 @@ bool camInit() {
   return esp_camera_init(&cc) == ESP_OK;
 }
 
-void sdSave(camera_fb_t* fb) {
-  String path = "/sw_" + String(millis()) + "_" + String(snapCount++) + ".jpg";
-  File f = SD_MMC.open(path, FILE_WRITE);
-  if (f) { f.write(fb->buf, fb->len); f.close(); }
-}
+void sdSaveRemovalMarker() {}  // (removed — the beam-moment capture writes its own SD copy inside beamSnapshot())
 
 void setup() {
   Serial.begin(115200);
   if (!camInit()) { Serial.println("CAMERA FAIL"); while (true) delay(100); }
   SD_MMC.setPins(39, 38, 40);               // S3 GPIO-matrix SD: CLK=39, CMD=38, D0=40
   SD_MMC.begin("/sdcard", true);            // 1-bit mode: leaves GPIOs free
+  pinMode(PIN_BEAM2, INPUT_PULLUP);         // receiver #2 comparator DO (GPIO 21 has real pull-ups)
+  attachInterrupt(digitalPinToInterrupt(PIN_BEAM2), onBeam2Edge, CHANGE);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   while (WiFi.status() != WL_CONNECTED) { delay(200); Serial.print("."); }
   Serial.println("\nCAM ready at http://" + WiFi.localIP().toString());
@@ -111,6 +149,11 @@ void setup() {
 }
 
 void loop() {
+  // Beam #2 fast path runs on every pass — the snapshot must land while the
+  // vehicle is still in frame. Takes ~200-400 ms (grab + SD write), then the
+  // server is free again.
+  if (beam2SnapReq) { beam2SnapReq = false; beamSnapshot(); }
+
   // One connection at a time, but every request now finishes in well under a
   // second — so the hub's /capture is never stuck behind a long-running stream
   // (see the note below the sketch).
@@ -121,10 +164,24 @@ void loop() {
   path = path.substring(0, path.indexOf(' '));
   if (path.indexOf('?') >= 0) path = path.substring(0, path.indexOf('?'));  // strip ?ts= cache-buster
 
-  if (path == "/capture" || path == "/stream") {          // single JPEG
+  if (path == "/capture") {                              // violation photo
+    bool fresh = snapBuf && (millis() - snapMs) < BEAM2_FRESH_MS;
+    if (fresh) {                                         // serve the cached beam-moment frame —
+      c.println("HTTP/1.1 200 OK\nContent-Type: image/jpeg"); // the vehicle AT the pole, plate in frame
+      c.println("Content-Length: " + String(snapLen) + "\n");
+      c.write(snapBuf, snapLen);
+    } else {                                             // no fresh beam photo: live grab
+      camera_fb_t* fb = esp_camera_fb_get();             // (fallback path — beam missed or CAM rebooted)
+      if (!fb) { c.println("HTTP/1.1 503\nConnection: close\n"); c.stop(); return; }
+      c.println("HTTP/1.1 200 OK\nContent-Type: image/jpeg");
+      c.println("Content-Length: " + String(fb->len) + "\n");
+      c.write(fb->buf, fb->len);
+      esp_camera_fb_return(fb);
+    }
+  }
+  else if (path == "/stream") {                          // single JPEG, no SD write
     camera_fb_t* fb = esp_camera_fb_get();
     if (!fb) { c.println("HTTP/1.1 503\nConnection: close\n"); c.stop(); return; }
-    if (path == "/capture") sdSave(fb);                   // only violations hit the microSD
     c.println("HTTP/1.1 200 OK\nContent-Type: image/jpeg");
     c.println("Content-Length: " + String(fb->len) + "\n");
     c.write(fb->buf, fb->len);
@@ -141,6 +198,8 @@ void loop() {
 
 **Why polled frames, not a true MJPEG stream?** A single-core ESP32 serving an endless multipart stream blocks its one HTTP server — while SSU watches live video, the hub's `/capture` would never get served, and violations would upload photoless. Serving one JPEG per request keeps every connection sub-second, so `/capture` is (virtually) always answerable; the dashboard gets a ~1 frame/s feed — plenty for lane monitoring — and the microSD only ever holds violation evidence, not live-view junk. True 10 fps streaming needs a dual-core split or RTSP — that's the upgrade path, not the POC.
 
+**Why the beam lives on the CAM now (self-triggered snapshot):** with receiver #2 wired to the CAM's GPIO 21, the board that owns the camera also owns the trigger — the snapshot fires the instant the beam breaks with zero HTTP round-trip latency, while the vehicle is at the pole with the plate in frame. The hub still fetches via `GET /capture`, but what it receives is the **beam-moment cached frame**, not a "whenever the request happened to land" grab. The hub's own beam #1 (GPIO 25) keeps the event-confirm and event-close logic unchanged. Worst case (beam #2 mis-aimed, CAM rebooted): `/capture` falls back to a live grab — same behavior as the old design, never worse.
+
 **Write down the IP it prints** (e.g. `192.168.1.45`) — the hub and the dashboard both need it. For production, give the CAM a **DHCP reservation** on the campus router so it never changes ([DEPLOYMENT.md §pre-install](DEPLOYMENT.md#2-pre-install-checklist)).
 
 ---
@@ -151,7 +210,7 @@ The brain: counts Doppler pulses, converts Hz→km/h, confirms with the laser br
 
 ```cpp
 /* safeway-hub — ESP32 38-pin (sensor hub)
-   GPIO 34 = CDM324 OUT | GPIO 25 = laser receiver DO | GPIO 27 = buzzer */
+   GPIO 34 = CDM324 OUT | GPIO 25 = laser receiver #1 DO (beam #1) | GPIO 27 = buzzer */
 
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -339,9 +398,9 @@ void loop() {
 - **Buzzer behavior:** sounds *while* the vehicle is actively over the limit (warns the driver in real time, per the paper's intent) + a confirmation double-beep when the violation is logged.
 - **`confirmed` field:** the break-beam broke during the radar event → a solid object physically crossed the lane → guards against radar phantoms (branches, pedestrians). Dashboard shows it; SSU filters on it.
 - **Fail-safe:** if the CAM or WiFi is down, the CAM's microSD still holds every photo (`/capture` handler saves before serving) — pull the card during maintenance ([DEPLOYMENT.md §4](DEPLOYMENT.md#4-connectivity-failover-notes)).
-- **Beam-break snapshot (the plate fix):** the photo is fetched the moment the break-beam fires — the vehicle is at the pole (1.5–3 m), plate readable in frame. The old close-time fetch photographed 15–35 m *behind* a 30 km/h car: at that distance a plate is ~12 px wide at SVGA — unreadable by OCR. The beam ISR raises a flag; the loop services it within milliseconds and buffers the base64 on the heap.
+- **Beam-break snapshot (the plate fix):** the CAM self-triggers its capture the moment **beam #2** breaks — zero HTTP latency, the vehicle is at the pole (1.5–3 m), plate readable in frame — and caches it in PSRAM; the hub's fetch (fired on **beam #1**'s break flag, its own instant trigger) then pulls the cached beam-moment frame. The old close-time fetch photographed 15–35 m *behind* a 30 km/h car: at that distance a plate is ~12 px wide at SVGA — unreadable by OCR. Each beam ISR raises a flag; each board's loop services it within milliseconds.
 - **Buffered upload:** the snapshot lives in one persistent `String photoB64` — cleared per event but its heap capacity is reused (assignment never shrinks it, so no fragmentation creep). The POST body is one pre-reserved allocation; peak hub heap ≈ 2× the photo (~120 KB at SVGA). SVGA stays the default — FRAMESIZE_HD is now tighter than the old single-copy design; heap-test before switching.
-- **Radar-only fallback:** if the beam never broke (mis-aimed far post) or the snapshot fetch failed (CAM reboot), close-out retries once — a late frame, car possibly past the pole; still better than no photo, and the CAM's microSD keeps its copy either way.
+- **Radar-only fallback:** if beam #1 never broke (mis-aimed far post) or the snapshot fetch failed (CAM reboot), close-out retries once — a late frame, car possibly past the pole; still better than no photo, and the CAM's microSD keeps its copy either way.
 - **Blocking close-out (known limit):** with the photo already buffered, the violation handler (double-beep + POST) blocks the loop only ~1 s typical; worst case with the CAM *and* server unreachable (two fetch timeouts + POST timeout) ~12 s. Pulses arriving during it are discarded, so a car entering mid-upload is measured from its next 300 ms window (peak-hold still catches its peak). A per-event async state machine is the upgrade path.
 - **HB100 variant?** change one constant (`HZ_PER_KPH = 19.49`) — nothing else.
 
@@ -364,7 +423,7 @@ void loop() {
 ### 4.3 Bench smoke test (before mounting anything)
 1. Hub serial shows `ACTIVE` lines when you wave a hand in front of the radar.
 2. Browser on the same WiFi: `http://<cam-ip>/stream` → a frame appears (the dashboard's live pane re-polls it ~1/s).
-3. Block/unblock the laser beam with a book at ~1 m → hub prints `BEAM BROKEN`, boot message shows beam state. With a radar event active (wave over the radar), the block must also print `SNAPSHOT: ok` within ~1 s — the plate-frame capture (bench test B10).
+3. Block/unblock **beam #1** with a book at ~1 m → hub prints `BEAM BROKEN`, boot message shows beam state. Block/unblock **beam #2** → CAM serial prints `BEAM2 SNAP → SD ok` each break. With a radar event active (wave over the radar), the beam-#2 block must also make the hub's photo fetch return the cached frame — hub prints `SNAPSHOT: ok` within ~1 s (bench test B10).
 4. With the API running ([BACKEND.md](BACKEND.md)): drive a phone-flashlight "event" over the radar at speed → dashboard shows the incident with photo.
 
 ---
@@ -376,7 +435,9 @@ void loop() {
 | `SPEED_LIMIT_KPH` | 30 | violation threshold + buzzer trigger |
 | `HZ_PER_KPH` | 44.7 | CDM324 physics — leave unless HB100 (19.49) |
 | `COSINE_ANGLE_DEG` | 0 | set to measured mount angle to remove cosine under-read |
-| `BEAM_BREAKS_LOW` | true | beam polarity — set from the §5.2 bench check (`true` = DO LOW means beam intact, most modules) |
+| `BEAM_BREAKS_LOW` | true | beam #1 polarity (hub) — set from the §5.2 bench check |
+| `CAM_BEAM_BREAKS_LOW` | true | beam #2 polarity (CAM) — set from its own bench check (`true` = DO LOW means beam intact, most modules) |
+| `BEAM2_FRESH_MS` | 8000 | how long the CAM serves its cached beam-moment photo after the break; longer = more tolerance for hub fetch delay, higher risk of serving a stale plate frame |
 | `MIN_SPEED_KPH` | 5 | noise floor; raise if tree-wobble false-triggers |
 | Window | 300 ms | shorter = faster response, noisier Hz estimate |
 | Event close | 1500 ms | silence before closing an event (lane clear) |

@@ -9,28 +9,29 @@
 
 ## Architecture (drives this BOM)
 
+```mermaid
+flowchart LR
+    subgraph HUB["ESP32 38-pin HUB — sensor board"]
+        H1["CDM324 radar OUT → GPIO 34<br/>Doppler pulse counting"]
+        H2["Laser receiver #1 DO → GPIO 25<br/>presence confirm"]
+        H3["Buzzer → GPIO 27<br/>overspeed alert"]
+    end
+    subgraph CAM["ESP32-S3 WROOM N16R8 CAM — camera board"]
+        C1["Laser receiver #2 DO → GPIO 21<br/>self-trigger"]
+        C2["OV5640 plate snapshot<br/>at beam #2 break + microSD save"]
+        C3["/stream polled live frame<br/>native USB-C flashing — no programmer board"]
+    end
+    subgraph FAR["FAR POST — opposite side of the lane"]
+        F1["KY-008 laser TX #1, always-on — own supply #1"]
+        F2["KY-008 laser TX #2, always-on — own supply #2"]
+        F3["red dots cross the lane to the two receivers<br/>no cable to the hub pole — self-powered"]
+    end
+    HUB <-. "same WiFi network — zero wires between boards" .-> CAM
+    F1 -. "beam #1" .-> H2
+    F2 -. "beam #2" .-> C1
 ```
-  ┌─ ESP32 38-pin HUB (sensor board) ──────────────────┐
-  │  CDM324 radar OUT ──► GPIO (Doppler pulse counting) │
-  │  Laser receiver DO ──► GPIO 25 (presence confirm)   │
-  │  Buzzer ──► GPIO (overspeed alert)                   │
-  │  WiFi: fetches photo from CAM, POSTs to cloud API    │
-  └──────────────┬──────────────────────────────────────┘
-                 │ same WiFi network — zero wires between boards
-  ┌─ ESP32-S3 WROOM N16R8 CAM (camera board) ──────────┐
-  │  OV5640 photo + live stream server                  │
-  │  microSD: local backup of every violation photo      │
-  │  native USB-C flashing (no programmer board needed) │
-  └─────────────────────────────────────────────────────┘
 
-  ┌─ FAR POST (opposite side of the lane) ─────────────┐
-  │  KY-008 laser TX, always-on (S strapped to VCC)     │
-  │  powered by a 2-wire 22AWG run from the hub box     │
-  │  red dot crosses the lane to the receiver           │
-  └─────────────────────────────────────────────────────┘
-```
-
-**Why two boards:** the classic AI-Thinker ESP32-CAM starves you for pins (camera + SD leaves ~2–3 usable GPIOs — no room for radar, beam receiver, and buzzer). Splitting duties gives the sensors a full 38-pin board and the camera a dedicated board — each simpler to code, flash, and debug. (The ESP32-S3 camera board now has GPIOs to spare, but the split is kept anyway: radar pulse-counting never competes with camera DMA, and a camera reboot can't drop speed measurements.) They meet over WiFi; no wires between them (the far-post laser TX is the only cable in the system — two thin wires).
+**Why two boards:** the classic AI-Thinker ESP32-CAM starves you for pins (camera + SD leaves ~2–3 usable GPIOs — no room for radar, beam receiver, and buzzer). Splitting duties gives the sensors a full 38-pin board and the camera a dedicated board — each simpler to code, flash, and debug. (The ESP32-S3 camera board now has GPIOs to spare — one of them takes beam #2's receiver — but the split is kept anyway: radar pulse-counting never competes with camera DMA, and a camera reboot can't drop speed measurements.) They meet over WiFi; no wires between them, and **no cable crosses the road** — each far-post laser TX is self-powered.
 
 **Full wiring diagram:** [wiring/circuit_image.png](../wiring/circuit_image.png) · editable [Cirkit Designer project](https://app.cirkitdesigner.com/project/192cfce5-5705-47b2-8c56-7a07da66e9da)
 
@@ -43,18 +44,18 @@
 | 1 | CDM324 24 GHz Doppler radar module (E-WOITD) | 1 | ₱184 | ₱184 | LazMall, 93% seller | — |
 | 2 | ESP32-S3 WROOM N16R8 CAM board + OV5640 5MP camera | 1 | ₱613 | ₱613 | 5.0 (3) · 91% store | — |
 | 3 | ESP32 38-pin dev board, CP2102, Type-C (DIYUSER) | 1 | ₱196 | ₱196 | 4.8★ (81) | 822 |
-| 4 | KY-008 laser transmitter + laser receiver module pair (Layad Circuits) | 1 pair | ₱253 | ₱253 | 97% seller · 4.7K sold store | — |
+| 4 | KY-008 laser transmitter + laser receiver module pair (Layad Circuits) | **2 pairs** | ₱253 | ₱506 | 97% seller · 4.7K sold store | — |
 | 5 | LM358 dual op-amp DIP-8 (2 pcs, fallback conditioner) | 1 pack | ₱25 | ₱25 | — | 370 |
 | 6 | Active buzzer 5V | 1 | ₱30 | ₱30 | 5.0 (42) | 174 |
 | 7 | Kingston microSD 16GB Class 10 | 1 | ₱219 | ₱219 | 4.8 (265) | 1.0K |
 | 8 | Dupont jumper wires 40-pin (M-F / M-M) | 2 sets | ₱39 | ₱78 | 4.8 (2,814) | 23.2K |
 | 9 | Breadboard 830 points (SYB MB-102) | 1 | ₱29 | ₱29 | 4.8 (1,959) | 15.0K |
-| 10 | 5V 2A power adapter (DC jack) | 2 | ₱53 | ₱106 | 4.9 (324) | 4.5K |
+| 10 | 5V 2A power supply adapter (DC 5.5×2.5mm jack) | 2 | ₱53 | ₱106 | 4.9 (324) | 4.5K |
 | 11 | Weatherproof enclosure IP68 ABS (ALLAN 200×100×70) | 1 | ₱220 | ₱220 | 4.9 (1,545) | 14.5K |
-| 12 | 2-core 22AWG cable 10 m (far-post laser run) | 1 | ₱51 | ₱51 | — | — |
+| 12 | Compact 5V USB charger (far-post laser TX supply) | 2 | ₱55 | ₱110 | — | — |
 | 13 | Zip ties 100pcs (mounting) | 1 | ₱12 | ₱12 | — | 153.8K |
 
-**GRAND TOTAL (recommended build): ≈ ₱2,016**
+**GRAND TOTAL (recommended build): ≈ ₱2,328**
 
 ---
 
@@ -109,7 +110,7 @@ The E-WOITD module sold on Lazada PH is the ICStation-style board with onboard t
 - **URL:** https://www.lazada.com.ph/products/pdp-i5141273577.html
 - **Backup (TX only):** KY-008 module from Fulabs ₱44 — https://www.lazada.com.ph/products/pdp-i5367051449.html (pair it with a separate laser-receiver module; e.g. "Laser Receiver Sensor" ₱165, Laguna — https://www.lazada.com.ph/products/pdp-i4352848577.html)
 - **Backup 2 (kit):** "KY-008 Laser Transmitter + Non-Modulator Laser Receiver Module Kit" ₱626 — https://www.lazada.com.ph/products/pdp-i15568605059.html
-- Role: **KY-008 TX** sits on the far post (650 nm red laser, ~5 mW, always-on); the **receiver module** (photodetector front-end — photodiode or LDR depending on module — with comparator and digital DO output) sits on the hub pole. A vehicle crossing the lane breaks the beam → DO changes state → hub flags "vehicle physically present" to confirm the radar event. This replaces the paper's IR break-beam concept with a visible-light version that resists sunlight interference.
+- Role: **beam #1** — KY-008 TX #1 sits on the far post (650 nm red laser, ~5 mW, always-on), receiver #1 sits on the hub pole → hub GPIO 25: confirms the radar event. **beam #2** — KY-008 TX #2 (far post) + receiver #2 on the CAM board → **GPIO 21**: the CAM self-triggers its plate snapshot the instant the beam breaks and caches the frame for the hub's `/capture` fetch. This replaces the paper's IR break-beam concept with a visible-light version that resists sunlight interference.
 - KY-008 pinout: **S = signal** (tie to 5 V for always-on — simplest), **middle = +5 V**, **− = GND**. Draws < 30 mA.
 - **Safety note:** 5 mW / 650 nm is Class 3R-adjacent — never look into the beam, don't aim at eye level of drivers/pedestrians; mount it low (plate height) and aim it across the lane at the receiver, not along it.
 
@@ -144,7 +145,7 @@ The E-WOITD module sold on Lazada PH is the ICStation-style board with onboard t
 ### 10. 5V 2A Power Supply Adapter (DC 5.5×2.5mm jack)
 - **Price:** ₱53.00 each, **2 pcs budgeted** · **Sold:** 4.5K · **Rating:** 4.9 (324) · **Location:** Bulacan
 - **URL:** https://www.lazada.com.ph/products/pdp-i3062233761.html
-- Note: one adapter powers the 38-pin hub (radar + beam receiver + buzzer **and the far-post KY-008 TX over the 22AWG run** — it draws < 30 mA, negligible), one powers the camera board — feed its **5V/VIN pin** from the adapter leads, or plug any USB-C charger into its Type-C port. WiFi bursts + camera draw peaks; separate adapters mean a camera reboot can't brown-out the radar mid-measurement.
+- Note: the system runs on **four independent supplies** — #3 powers the 38-pin hub (radar + receiver #1 + buzzer), #4 powers the camera board (feed its **5V/VIN pin** from the adapter leads, or plug any USB-C charger into its Type-C port), and each far-post laser TX (#1, #2) runs on its own compact supply at the far post (any 5V ≥1A source — the TX draws < 30 mA). No cable crosses the road; a supply failure can never cascade between beams or boards (a CAM reboot can't brown-out the radar, a dead far-post supply can't dim the other beam).
 - **Backup:** ₱55, 5.5K sold — https://www.lazada.com.ph/products/pdp-i2442570467.html
 
 ### 11. Weatherproof Enclosure — ALLAN IP68 ABS Junction Box
@@ -154,11 +155,9 @@ The E-WOITD module sold on Lazada PH is the ICStation-style board with onboard t
 - Note: 200×100×70 fits the 830-point breadboard + 38-pin board + camera board + radar wiring. **24 GHz passes through ABS plastic** — radar can sit behind a plain plastic wall (no metal!). The camera needs a window — see [HARDWARE.md §7](HARDWARE.md#7-enclosure-assembly-ip68-abs-200x100x70-mm).
 - **Budget alt:** IP65 ABS box ₱27.50 — https://www.lazada.com.ph/products/pdp-i5215693124.html (light rain only)
 
-### 12. 2-Core 22AWG Cable 10 m (far-post laser run)
-- **Price:** ₱50.51 (10 m roll, red/black) · **Location:** Bulacan (local express)
-- **URL:** https://www.lazada.com.ph/products/pdp-i5407853518.html
-- Role: powers the far-post KY-008 transmitter (5 V + GND) from the hub enclosure. 22AWG copper at < 30 mA has millivolts of drop even at 10 m — the laser runs at full brightness. Run it along the ground/curb (UV-rated ties, buried conduit sleeve if possible) — it is the system's only cable.
-- **Backup:** JCSYFAC same-spec ₱59.38 — https://www.lazada.com.ph/products/pdp-i15496940788.html
+### 12. Compact 5V USB Charger (far-post laser TX supply) — 2 pcs
+- **Price:** ≈ ₱55 each (any compact 5V ≥1A USB charger + short USB cable works — Lazada generic, e.g. https://www.lazada.com.ph/products/pdp-i3100389517.html or search "5V 1A USB charger")
+- Role: supplies #1 and #2 — each KY-008 TX on the far post runs on its own charger inside its housing (TX draws < 30 mA). This is what frees the system from the old 22AWG cross-road run: **no cable crosses the road at all**. Bench alternative: any USB power bank or spare phone charger for testing.
 
 ### 13. Cable/Zip Ties 100pcs (mounting + cable management)
 - **Price:** ₱12.00 · **Sold:** 40K+ · **Location:** Bulacan
@@ -170,9 +169,10 @@ The E-WOITD module sold on Lazada PH is the ICStation-style board with onboard t
 
 | Build | What changes | Total |
 |---|---|---:|
-| **Recommended** (as above) | — | **≈ ₱2,016** |
-| **Bare-bones bench POC** | IP65 box (−₱192); one adapter powering both boards + rail cap (−₱53); skip zip ties (−₱12); one jumper set (−₱39) | ≈ ₱1,720 |
-| **Deluxe** | Prebuilt LM358 amp module instead of ICs (+₱123); small IP65 box (e.g. ₱60) on the far post for the laser TX (+₱60) | ≈ ₱2,199 |
-| **No far post available?** | Skip the cross-lane beam (−₱253 −₱51) and run radar-only with `MIN_SPEED_KPH` raised — records stay but lose the two-sensor confirm flag | ≈ ₱1,712 |
+| **Recommended** (as above) | — | **≈ ₱2,328** |
+| **Bare-bones bench POC** | IP65 box (−₱192); one 2A adapter per board side + rail caps, USB power banks for the TXs instead of chargers (−₱110); skip zip ties (−₱12); one jumper set (−₱39) | ≈ ₱1,975 |
+| **Deluxe** | Prebuilt LM358 amp module instead of ICs (+₱123); small IP65 boxes (e.g. ₱60 each) on the far post for the laser TXs (+₱120) | ≈ ₱2,571 |
+| **Single beam (hub-only)** | Drop beam #2 (−₱253): CAM serves on-demand `/capture` as before — the hub's beam-break fetch becomes a close-time fetch; confirm logic (beam #1) unaffected | ≈ ₱2,075 |
+| **No far post available?** | Skip both cross-lane beams (−₱506 −₱110) and run radar-only with `MIN_SPEED_KPH` raised — records stay but lose the two-sensor confirm flag | ≈ ₱1,712 |
 
 Parts verified Sep 6–8, 2026; camera board swapped ESP32-CAM-MB → ESP32-S3 + OV5640 and re-verified Sep 10, 2026. Re-check prices before ordering — Lazada promo pricing moves daily.

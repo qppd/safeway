@@ -11,8 +11,8 @@ flowchart TB
     L5["L5 · PRESENTATION<br/>SSU browser: dashboard.html — Tailwind + vanilla JS<br/>table · photo pane · live feed"]
     L4["L4 · APPLICATION<br/>FastAPI :8000 — POST/GET/PATCH incidents<br/>photo serve · cam-status · dashboard hosting"]
     L3["L3 · DATA &amp; INTELLIGENCE<br/>SQLite (incidents) · uploads/ store<br/>plate recognition (OpenCV + Tesseract)"]
-    L2["L2 · EDGE DEVICES<br/>ESP32 hub: sensing + event logic + reporting<br/>ESP32-S3 CAM: evidence + stream"]
-    L1["L1 · SENSING &amp; PHYSICS<br/>CDM324 Doppler radar · KY-008 + receiver break-beam<br/>OV5640 imager · buzzer"]
+    L2["L2 · EDGE DEVICES<br/>ESP32 hub: sensing + event logic + reporting<br/>ESP32-S3 CAM: beam-triggered evidence + stream"]
+    L1["L1 · SENSING &amp; PHYSICS<br/>CDM324 Doppler radar · KY-008 beam pair #1 (confirm)<br/>KY-008 beam pair #2 (CAM snapshot trigger)<br/>OV5640 imager · buzzer"]
     L1 -- "GPIO electrical" --> L2
     L2 -- "WiFi HTTP" --> L4
     L4 -- "HTTP / HTML" --> L5
@@ -30,9 +30,10 @@ flowchart TB
 | Component | Owns | Never does |
 |---|---|---|
 | CDM324 radar | IF pulse generation (44.7 Hz/km/h) | — |
-| Break-beam pair | presence edge across the lane | speed (radar's job) |
-| ESP32 hub | pulse counting, beam ISR+debounce, Hz→km/h, cosine correction, peak-hold, buzzer, beam-break photo snapshot, incident POST | OCR, long-term storage |
-| ESP32-S3 CAM | capture on demand, polled live frame, microSD save | speed logic, upload |
+| Break-beam pair #1 | presence edge across the lane (hub side) | speed (radar's job) |
+| Break-beam pair #2 | snapshot trigger edge across the lane (CAM side) | speed or event confirm |
+| ESP32 hub | pulse counting, beam #1 ISR+debounce, Hz→km/h, cosine correction, peak-hold, buzzer, beam-break photo fetch, incident POST | OCR, long-term storage |
+| ESP32-S3 CAM | beam #2 self-triggered capture, PSRAM photo cache, `/capture` serving, polled live frame, microSD save | speed logic, upload |
 | FastAPI server | validation, server-side timestamps, photo storage, OCR orchestration, dashboard hosting | sensing decisions |
 | Dashboard | read, filter, review, view live feed | write raw records (only PATCH review) |
 
@@ -41,12 +42,13 @@ flowchart TB
 | # | Interface | Protocol | Contract |
 |---|---|---|---|
 | I1 | Radar OUT → hub GPIO 34 | electrical, RISING ISR | pulses; rate ∝ speed |
-| I2 | Beam RX DO → hub GPIO 25 | electrical, CHANGE ISR | level encodes intact/broken (`BEAM_BREAKS_LOW`) |
+| I2 | Beam #1 RX DO → hub GPIO 25 | electrical, CHANGE ISR | level encodes intact/broken (`BEAM_BREAKS_LOW`) |
 | I3 | Buzzer ← GPIO 27 | electrical | HIGH = over limit |
-| I4 | Hub → CAM `GET /capture` | WiFi HTTP | fires at beam-break (vehicle at the pole — plate in frame) during an active event; fallback fetch at event close; returns JPEG (+ SD save) |
-| I5 | Browser → CAM `GET /stream` | LAN HTTP, polled ~1/s | one JPEG per request — pseudo-live, direct, no server relay |
-| I6 | Hub → API `POST /api/incidents` | WiFi HTTP JSON | device_id, speed_kph, limit_kph, doppler_hz, confirmed, photo_b64 → 201 |
-| I7 | Browser → API GET/PATCH | HTTP JSON | list/filter incidents; mark reviewed; photos |
+| I4 | Beam #2 RX DO → CAM GPIO 21 | electrical, CHANGE ISR | break edge → self-triggered snapshot; level polarity `CAM_BEAM_BREAKS_LOW` |
+| I5 | Hub → CAM `GET /capture` | WiFi HTTP | fires at beam #1 break (vehicle at the pole); returns the CAM's cached beam-moment JPEG if fresh, else a live grab (+ SD save) |
+| I6 | Browser → CAM `GET /stream` | LAN HTTP, polled ~1/s | one JPEG per request — pseudo-live, direct, no server relay |
+| I7 | Hub → API `POST /api/incidents` | WiFi HTTP JSON | device_id, speed_kph, limit_kph, doppler_hz, confirmed, photo_b64 → 201 |
+| I8 | Browser → API GET/PATCH | HTTP JSON | list/filter incidents; mark reviewed; photos |
 
 ## 4. Network Topology
 
@@ -67,10 +69,12 @@ flowchart LR
 | Failure | Immediate effect | System behavior |
 |---|---|---|
 | WiFi down at pole | upload fails | photos still saved to CAM microSD; hub retries next event; card reconciled at maintenance |
-| CAM reboot (heap) | beam-break snapshot fails (and the close-time fallback) | hub logs incident with `confirmed` but no photo; microSD keeps prior photos; CAM auto-recovers ~60 s |
+| CAM reboot (heap) | beam #2 snapshot missed (and the close-time fallback) | hub logs incident with `confirmed` but no photo; microSD keeps prior photos; CAM auto-recovers ~60 s |
 | Server down | POST fails | same as WiFi-down: evidence on microSD, dashboard obviously dark |
-| Beam mis-aimed (far post knocked) | confirmed=false always | incidents still log (radar-only); flagged in dashboard for review |
-| Radar phantom (branch/banners) | false kph ≥ 5 | beam stays intact → confirmed=false → filtered by SSU |
+| Beam #1 mis-aimed (far post knocked) | confirmed=false always | incidents still log (radar-only); flagged in dashboard for review |
+| Beam #2 mis-aimed (far post knocked) | CAM never self-triggers | hub's `/capture` falls back to a live grab — same behavior as the old single-beam design, never worse |
+| Either far-post supply dead | one TX dark | other beam + radar unaffected (four isolated supplies — no cascade); dead beam detected in maintenance round via its boot-time state print |
+| Radar phantom (branch/banners) | false kph ≥ 5 | beams stay intact → confirmed=false → filtered by SSU |
 | Photo too dark (night) | OCR fails | plate_text stays NULL; nightly OCR retry; long-term fix is lighting |
 
 **Design principle:** no single failure loses evidence — the CAM's microSD is the always-write copy, the cloud is the convenient copy.
@@ -79,7 +83,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    POC["POC / evaluation<br/>one laptop: FastAPI + SQLite + dashboard<br/>both boards on bench WiFi"] --> PILOT["Pilot — one lane<br/>campus server or mini-PC in guard post<br/>one pole unit + far post"] --> SCALE["Scale — multi-lane<br/>per-lane pole units → one server<br/>SQLite → PostgreSQL · uploads/ → object storage"]
+    POC["POC / evaluation<br/>one laptop: FastAPI + SQLite + dashboard<br/>both boards on bench WiFi"] --> PILOT["Pilot — one lane<br/>campus server or mini-PC in guard post<br/>one pole unit + self-powered far post"] --> SCALE["Scale — multi-lane<br/>per-lane pole units → one server<br/>SQLite → PostgreSQL · uploads/ → object storage"]
 ```
 
 The architecture doesn't change between stages — only where the server process runs and which database driver it opens.

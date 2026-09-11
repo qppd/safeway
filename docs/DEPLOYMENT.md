@@ -14,14 +14,14 @@ Criteria for the pilot lane — walk candidates with SSU:
 |---|---|---|
 | Lane length | ≥ 30 m straight visible from pole position | Radar needs 10–30 m of approach to build the peak reading |
 | Speed history | Known overspeeding complaints | Matches the study's purpose |
-| Power | Outlet / posts within extension reach | Two 5V 2A adapters need mains |
+| Power | Outlets within extension reach | Four supplies: two 5V 2A adapters at the hub pole + two compact USB chargers at the far post (one extension cord reaches both posts if the far side has no outlet) |
 | WiFi | RSSI ≥ −70 dBm at the pole (test with a phone at mount height) | Both boards upload reliability |
 | Mounting | One rigid post/pole/wall corner at lane edge, box at ~1–1.5 m | Single-pole unit; camera + radar aim |
 | Background | No large moving objects in the radar cone: trees, banners, AC condensers, parked cars | Phantom triggers |
 | Safety | Lane remains passable; nothing overhanging traffic | Duh |
 | SSU visibility | Near a guard post / patrol route | Physical deterrence + maintenance access |
 
-**Record on the survey sheet:** pole GPS/ID, lane width at the crossing point (sets the far-post distance + 22AWG run length), measured radar mount angle (sets `COSINE_ANGLE_DEG`), far-post footing option (existing post/tree/fence vs. new PVC), power outlet location, WiFi SSID + signal, photo of the site from both directions.
+**Record on the survey sheet:** pole GPS/ID, lane width at the crossing point (sets the far-post distance), measured radar mount angle (sets `COSINE_ANGLE_DEG`), far-post footing option (existing post/tree/fence vs. new PVC), power outlet locations both sides of the lane, WiFi SSID + signal, photo of the site from both directions.
 
 ## 2. Pre-Install Checklist
 
@@ -42,8 +42,8 @@ Criteria for the pilot lane — walk candidates with SSU:
 
 1. Mount the enclosure on the pole at **1–1.5 m**, camera facing the trigger zone at plate height.
 2. **Radar aim:** beam along the traffic direction, **≤15° off the lane axis** — the sweet spot is 10–15°. A protractor app on your phone against the box edge works.
-3. **Break-beam alignment (one-time, two-person):** far-post KY-008 dot aimed at the receiver window on the hub enclosure — one person watches the receiver LED / hub serial `BEAM` state, the other nudges the far post until beam reads **intact**. Re-check after typhoons (a knocked far post is the #1 beam failure mode).
-4. Power: adapters inside a small weatherproof junction box at the outlet; DC runs up to the enclosure; drip loops at every entry.
+3. **Break-beam alignment (one-time, two-person, ×2 pairs):** aim each far-post KY-008 dot at its receiver window — TX #1 → receiver #1 (hub serial `BEAM` state), TX #2 → receiver #2 (CAM serial `BEAM2` state). Nudge each far post until both beams read **intact**. Re-check after typhoons (a knocked far post is the #1 beam failure mode).
+4. Power: hub-pole adapters inside a small weatherproof junction box at the outlet; DC runs up to the enclosure; drip loops at every entry. Far post: each TX's compact USB charger lives inside its own small housing — no mains run crosses the road.
 5. UV-rated cable ties on all runs; check nothing metallic sits between radar face and road.
 
 ### 3.2 Verify, then leave
@@ -88,7 +88,7 @@ Leave printed copies: this guide's §5–7, the dashboard URL, and the fault tab
 
 ### Typhoon season prep
 
-Take-down criteria (SSU decides): storm signal #2 or expected gusts > 60 km/h → unpower, unbolt the box, bring it indoors. One box, two adapters, four screws — **10-minute teardown** (unclip the 22AWG pair at the far post and coil it with the box; the far-post KY-008 stays capped until re-install).
+Take-down criteria (SSU decides): storm signal #2 or expected gusts > 60 km/h → unpower, unbolt the box, bring it indoors. One box, two adapters, four screws — **10-minute teardown** (unplug the two far-post USB chargers and cap the TX housings; nothing crosses the road, so there is no cable run to coil — the far-post TXs + chargers come down as two self-contained units).
 
 ## 7. Fault Symptoms → Actions (leave with SSU)
 
@@ -97,11 +97,13 @@ Take-down criteria (SSU decides): storm signal #2 or expected gusts > 60 km/h �
 | Buzzer silent on a fast vehicle | Radar face blocked? (dirt, stickers, bird nest on the box) | Clean wall; IT ticket — check hub serial |
 | Live feed grayed out | CAM rebooted — give it 60 s | IT ticket — power-cycle CAM adapter |
 | Dashboard no new records, buzzer works | WiFi down at the pole (phone test) | IT ticket — network team |
-| Records but `confirmed` always — | Receiver window dirty / far post knocked (beam permanently broken or mis-aimed) | Clean window; re-align far post (§3.1); check `BEAM_BREAKS_LOW` polarity |
+| Records but `confirmed` always — | Receiver #1 window dirty / far post knocked (beam #1 permanently broken or mis-aimed) | Clean window; re-align TX #1 (§3.1); check `BEAM_BREAKS_LOW` polarity |
+| Photos never beam-timed (stale angles) | Beam #2 mis-aimed — CAM never self-triggers | Re-align TX #2 (CAM serial `BEAM2`); check `CAM_BEAM_BREAKS_LOW` polarity; verify far-post supply #2 |
 | Photos dark/blurry at night | Confirm lane light is on | Add lighting (capstone Optimize phase) |
 | Plate column empty | Photo angle changed? | Re-run camera aim (§3.1) — OCR retries nightly |
 | Speeds look wrong (low) | Pole knocked to a steeper angle? | Re-measure angle; update `COSINE_ANGLE_DEG` |
-| Either board off entirely | Check its adapter at the outlet | Swap adapter (spare in kit) |
+| Either board off entirely | Check its supply at the outlet | Swap supply (spare adapter in kit) |
+| One beam dark, other fine | That far-post USB charger failed | Swap charger (spare in kit); re-align dot |
 | Phantom events, no cars visible | Something moving in the radar cone? | Clear the corridor; raise `MIN_SPEED_KPH` |
 
 ## 8. Data & Privacy Notes

@@ -43,8 +43,10 @@ Everything SafeWay is built on — deliberately small, POC-friendly, and free.
 | Part | Role |
 |---|---|
 | CDM324 24 GHz Doppler radar | Speed measurement (Doppler IF = 44.7 Hz per km/h) |
-| KY-008 laser TX + photodetector receiver | Break-beam presence confirmation across the lane |
-| ESP32 38-pin dev board | Sensor hub (radar GPIO 34, beam GPIO 25, buzzer GPIO 27) |
+| KY-008 laser pair #1 (TX far post + receiver on hub) | Break-beam presence confirmation across the lane |
+| KY-008 laser pair #2 (TX far post + receiver on CAM, GPIO 21) | CAM self-triggered snapshot at the beam break |
+| Active buzzer 5V | On-site overspeed alert (hub GPIO 27) |
+| ESP32 38-pin dev board | Sensor hub (radar GPIO 34, beam #1 GPIO 25, buzzer GPIO 27) |
 | ESP32-S3 WROOM N16R8 CAM (OV5640) | Photo evidence, live stream, microSD failover |
 
 ---
@@ -55,4 +57,4 @@ Everything SafeWay is built on — deliberately small, POC-friendly, and free.
 - **One process to deploy** — uvicorn serves API + dashboard; SQLite is a file; no Docker required for the POC (add it later for the campus server).
 - **No frontend build chain** — Tailwind via CDN + vanilla JS means nothing to compile, nothing to break during a capstone timeline.
 - **Graceful upgrades** — SQLite → PostgreSQL, local `uploads/` → object storage, local OCR → cloud ANPR: each swap is isolated to one module.
-- **All free & open-source** — total software cost ₱0; the budget lives in hardware (~₱1,900).
+- **All free & open-source** — total software cost ₱0; the budget lives in hardware (~₱2,328).

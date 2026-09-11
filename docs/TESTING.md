@@ -17,11 +17,13 @@ Run in order — each gates the next. With two boards, several tests are per-boa
 | B3 | Hub boot | No boot loop; `SafeWay HUB ready` in serial monitor |
 | B4 | CAM boot | `CAM ready at http://<ip>` printed; `/capture` returns a JPEG in a browser |
 | B5 | Live frame | `/stream` returns a JPEG in a browser; the dashboard's live pane refreshes ~1/s |
-| B6 | Break-beam sanity | Block the beam with a book at ~1 m → hub prints `BEAM BROKEN`; remove → intact; boot line shows beam state |
+| B6 | Break-beam #1 sanity | Block the beam with a book at ~1 m → hub prints `BEAM BROKEN`; remove → intact; boot line shows beam state |
+| B6b | Break-beam #2 sanity (CAM) | Block beam #2 → CAM serial prints `BEAM2 SNAP → SD ok` and a new `/sw_*.jpg` appears on the microSD; remove → intact |
 | B7 | Buzzer | Sounds while speed > limit during an event; silent otherwise |
 | B8 | WiFi + API | `POST /api/incidents` returns 201 on a simulated violation |
 | B9 | SD backup | Photo exists on the CAM's microSD after an event, even with the API down |
-| B10 | Beam-break snapshot | With `SPEED_LIMIT_KPH` temporarily set to 5: open a radar event (wave over the radar), then block the beam → hub prints `SNAPSHOT: ok` **within ~1 s of the block** (not at event close); the logged incident carries the photo |
+| B10 | Beam-break snapshot | With `SPEED_LIMIT_KPH` temporarily set to 5: open a radar event (wave over the radar), then block beam #2 → CAM caches the frame; the hub's fetch (block beam #1 too) returns the **cached beam-moment JPEG** — hub prints `SNAPSHOT: ok` **within ~1 s of the block** (not at event close); the logged incident carries the photo |
+| B11 | Stale-cache fallback | Wait > `BEAM2_FRESH_MS` (8 s) after a beam-#2 break, then request `/capture` → CAM serves a **live grab**, not the stale plate frame |
 
 ## 2. Speed Calibration (the critical test)
 
@@ -70,7 +72,7 @@ The measurement chain is: **Doppler Hz ÷ 44.7 = km/h** (+ cosine correction). C
 
 - Radar detects overspeed → buzzer ON: ≤ ~400 ms worst case (a reading only exists at each 300 ms window close — the window is the resolution).
 - Event close (lane clear + 1.5 s) → record visible in dashboard: stopwatch 5 runs; POC target **≤ 10 s** (the POST dominates — the photo is already buffered from the beam-break snapshot; sub-5 s on campus LAN).
-- Beam-break → `SNAPSHOT: ok` on serial: ≤ ~1 s from the block (CAM fetch time).
+- Beam-break → `SNAPSHOT: ok` on serial: ≤ ~1 s from the block (the CAM's self-triggered capture is near-instant; the hub's fetch of the cached frame follows within the same window).
 - Log both in the template below.
 
 ## 4. Reliability / Soak Test
@@ -78,7 +80,7 @@ The measurement chain is: **Doppler Hz ÷ 44.7 = km/h** (+ cosine correction). C
 - Run both boards continuously for **48 h** (bench, aimed at a walkway with occasional traffic).
 - Pass: no reboots, no missed events, no WiFi drops > 3 min, CAM microSD has all photos, hub serial shows no brownout resets.
 - **Two-board specific:** power-cycle the CAM mid-soak (simulating a camera crash). Hub must keep measuring; the next violation photo fetch reconnects automatically. Dashboard's `cam-status` should flip to offline and back.
-- Watch hub serial for brownout resets — a reset means power rail problems ([HARDWARE.md §5.4](HARDWARE.md#54-power-design)).
+- Watch hub serial for brownout resets — a reset means power rail problems ([HARDWARE.md §5.4](HARDWARE.md#54-power-design--four-independent-supplies)).
 
 ## 5. Usability (SSU panel)
 
@@ -143,7 +145,9 @@ Longest outage: ____ min   SD photos present: Y/N   CAM power-cycle recovery: Y/
 | Serial shows Hz but speed ~½ expected | Radar variant IF scaling differs | Re-verify §3; recalibrate `HZ_PER_KPH`, document |
 | Constant −5–10% on everything | Cosine error from mount angle | Measure angle; set `COSINE_ANGLE_DEG` |
 | Phantom events with no vehicle | Branches/banners in beam cone; `MIN_SPEED_KPH` too low | Clear the beam corridor; raise the noise floor |
-| `confirmed` never true | Beam mis-aimed / DO divider missing / `BEAM_BREAKS_LOW` polarity wrong | Re-align far post; check §5.2 level; flip the polarity constant |
+| `confirmed` never true | Beam #1 mis-aimed / DO divider missing / `BEAM_BREAKS_LOW` polarity wrong | Re-align far post; check §5.2 level; flip the polarity constant |
+| CAM never prints `BEAM2 SNAP` | Beam #2 mis-aimed / its far-post supply dead / `CAM_BEAM_BREAKS_LOW` polarity wrong | Re-align TX #2; check supply #2; flip the CAM polarity constant |
+| Photos serve but show the wrong car (stale plate frame) | `BEAM2_FRESH_MS` too long for the traffic pattern | Lower it (e.g. 5 s); B11 validates the stale-cache fallback |
 | Hub can't fetch photo | CAM IP changed (DHCP) | Set DHCP reservation; update `CAM_IP` |
 | Photos dark/blurry at night | OV5640 gain maxed, plate unreadable | Add lane lighting (Optimize phase); OCR retries nightly |
 | OCR < 50% accuracy | Photo angle/distance wrong for plate size | Camera closer to plate height; capture at trigger zone |

@@ -27,7 +27,7 @@ SafeWay is a low-cost, institutional-scale vehicle speed monitoring system. A 24
 
 Overspeeding inside institutional campuses is monitored manually — by visual observation and paper logging — which is inconsistent and unreliable. Commercial speed-enforcement systems (radar, ANPR cameras) are engineered for highways and priced beyond what small institutions can afford.
 
-SafeWay answers that gap with a **proof-of-concept** built from ~₱1,900 worth of off-the-shelf IoT parts: it measures speed with radar physics, captures evidence, recognizes plate numbers, logs to the cloud, and surfaces violations on a dashboard with a live camera feed — at institutional scale and budget.
+SafeWay answers that gap with a **proof-of-concept** built from ~₱2,328 worth of off-the-shelf IoT parts: it measures speed with radar physics, captures evidence, recognizes plate numbers, logs to the cloud, and surfaces violations on a dashboard with a live camera feed — at institutional scale and budget.
 
 Pilot client: a university **Security & Safety Unit (SSU)**. Development follows the **PPDIOO** lifecycle (Prepare, Plan, Design, Implement, Operate, Optimize).
 
@@ -39,10 +39,10 @@ Speed = Doppler frequency ÷ 44.7 Hz-per-km/h
 
 1. A vehicle enters the radar beam of the **CDM324 24 GHz Doppler module** (mounted on a single pole along the lane)
 2. The radar's IF output frequency is **directly proportional to speed** — the ESP32 hub counts pulses, converts Hz → km/h, and holds the **peak** reading for the event
-3. A **KY-008 laser break-beam** across the lane (transmitter on a far post, receiver on the hub pole) confirms a vehicle is physically present (rejects phantom radar triggers from branches/pedestrians)
+3. Two **KY-008 laser break-beams** across the lane (transmitters on the far post, each on its own supply; receivers on the hub pole) confirm a vehicle is physically present (rejects phantom radar triggers from branches/pedestrians)
 4. If peak speed > limit (e.g. 30 km/h campus limit — `SPEED_LIMIT_KPH`):
    - **Buzzer** sounds a live warning while the vehicle is over the limit
-   - The moment the break-beam fires — vehicle **at the pole**, plate in frame — the hub fetches a photo from the **ESP32-S3 CAM board** (`/capture`), which also saves it to microSD
+   - **Beam #2 breaks → the ESP32-S3 CAM board grabs the photo itself** (vehicle **at the pole**, plate in frame) and caches it; beam #1 breaks → the hub fetches that cached beam-moment frame from `/capture`; the CAM also saves it to microSD
    - When the lane clears, the incident record (speed, raw Doppler Hz, confirm flag, photo) is **POSTed to the cloud API**
 5. SSU personnel watch the **live lane feed** and review violations on the dashboard; plate numbers are read from captured photos for record accuracy
 
@@ -52,12 +52,13 @@ Speed = Doppler frequency ÷ 44.7 Hz-per-km/h
 - **Two-board architecture** — 38-pin ESP32 hub owns all sensors; ESP32-S3 CAM owns imaging. WiFi between them, no data cables
 - **Live lane feed** — SSU sees the monitored road from the dashboard (polled ~1 frame/s)
 - **Dual-sensor confirmation** — radar + laser break-beam agreement flags each incident (evidence-grade: raw Doppler Hz stored with every record)
+- **Beam-triggered plate capture** — the camera self-triggers at its own break-beam: zero HTTP latency, car at the pole, plate in frame
 - Photo evidence capture with microSD backup logging
 - Cloud data logging through REST API integration
 - On-site audible overspeed alert (active buzzer)
 - Web dashboard for authorized SSU personnel
 - Plate number recognition from captured images
-- ~₱1,900 prototype cost vs. commercial radar/ANPR systems
+- ~₱2,328 prototype cost vs. commercial radar/ANPR systems
 
 ## Hardware
 
@@ -66,13 +67,13 @@ Core components (full verified shopping list with Lazada PH links, prices, and r
 | Component | Role |
 |---|---|
 | CDM324 24 GHz Doppler radar | Speed measurement (IF frequency = 44.7 Hz per km/h) |
-| ESP32 38-pin dev board | Sensor hub — pulse counting, beam confirm, buzzer, cloud upload |
-| ESP32-S3 WROOM N16R8 CAM + OV5640 | Camera board — photo snapshots, polled live feed, microSD backup |
-| KY-008 laser TX + receiver pair | Presence confirmation — far-post transmitter, hub-pole receiver, break-beam across the lane |
+| ESP32 38-pin dev board | Sensor hub — pulse counting, beam #1 confirm, buzzer, cloud upload |
+| ESP32-S3 WROOM N16R8 CAM + OV5640 | Camera board — beam #2 self-triggered snapshots, polled live feed, microSD backup |
+| KY-008 laser TX + receiver pairs ×2 | Beam #1: presence confirmation (hub GPIO 25) · Beam #2: CAM snapshot trigger (GPIO 21) — far-post TXs, hub-pole receivers |
 | Active buzzer 5V | Overspeed alert |
 | microSD 16GB Class 10 | Local photo backup on the CAM board |
 | LM358 op-amp (fallback) | Signal conditioning if the radar variant's IF is weak |
-| 5V 2A adapters ×2 + IP68 enclosure + breadboard, jumpers, zip ties | Power, weatherproofing, assembly |
+| 5V 2A adapters ×2 + USB chargers ×2 (far post) + IP68 enclosure + breadboard, jumpers, zip ties | Four independent supplies, weatherproofing, assembly |
 
 **Complete wiring diagram:** [wiring/circuit_image.png](wiring/circuit_image.png) — every module, pin, and power rail in one picture; visual companion to the pin-by-pin tables in [HARDWARE.md](docs/HARDWARE.md) (editable in [Cirkit Designer](https://app.cirkitdesigner.com/project/192cfce5-5705-47b2-8c56-7a07da66e9da)).
 
@@ -81,15 +82,17 @@ Core components (full verified shopping list with Lazada PH links, prices, and r
 ```mermaid
 flowchart TB
     RADAR["CDM324 Doppler radar<br/>IF = 44.7 Hz per km/h"]
-    BEAM["KY-008 + receiver<br/>break-beam across lane"]
-    HUB["ESP32 38-pin HUB — sensors<br/>radar → GPIO 34 · beam → GPIO 25 · buzzer → GPIO 27<br/>peak speed = Hz ÷ 44.7 ÷ cos(mount angle)"]
-    CAM["ESP32-S3 WROOM CAM (OV5640)<br/>/capture → JPEG + SD save<br/>/stream → polled live frame"]
+    BEAM1["KY-008 pair #1<br/>break-beam across lane"]
+    BEAM2["KY-008 pair #2<br/>break-beam across lane (offset)"]
+    HUB["ESP32 38-pin HUB — sensors<br/>radar → GPIO 34 · beam #1 → GPIO 25 · buzzer → GPIO 27<br/>peak speed = Hz ÷ 44.7 ÷ cos(mount angle)"]
+    CAM["ESP32-S3 WROOM CAM (OV5640)<br/>beam #2 → GPIO 21 → self-triggered snapshot<br/>/capture → cached plate frame + SD save<br/>/stream → polled live frame"]
     API["Cloud API + Database<br/>incident records + photos<br/>plate number recognition"]
     DASH["Monitoring Dashboard (SSU)<br/>live lane feed + violation table + photo pane"]
 
     RADAR --> HUB
-    BEAM --> HUB
-    HUB -- "WiFi — fetch photo, JSON POST" --> CAM
+    BEAM1 --> HUB
+    BEAM2 --> CAM
+    HUB -- "WiFi — fetch cached beam photo, JSON POST" --> CAM
     HUB -- "violation event" --> API
     CAM -- "live feed" --> DASH
     API --> DASH
@@ -125,7 +128,7 @@ The complete build is organized into five stage guides. Follow them in order:
 
 | Step | Guide | What you'll do |
 |---:|---|---|
-| 1 | **[docs/HARDWARE.md](docs/HARDWARE.md)** | Verify the radar's IF output, wire the hub (radar + laser break-beam + buzzer), set up the CAM board, assemble into the enclosure |
+| 1 | **[docs/HARDWARE.md](docs/HARDWARE.md)** | Verify the radar's IF output, wire the hub (radar + laser break-beam #1 + buzzer) and the CAM (break-beam #2 → GPIO 21), set up the CAM board, assemble into the enclosure |
 | 2 | **[docs/FIRMWARE.md](docs/FIRMWARE.md)** | Set up Arduino IDE, flash both boards (camera server + sensor hub), tune speed limit + angles |
 | 3 | **[docs/BACKEND.md](docs/BACKEND.md)** | Stand up the cloud API + database + monitoring dashboard with live feed |
 | 4 | **[docs/TESTING.md](docs/TESTING.md)** | Bench-test each board, calibrate Doppler accuracy, run the ISO-based evaluation |
@@ -139,7 +142,7 @@ Each guide is self-contained with wiring tables, commands, and checklists.
 git clone https://github.com/qppd/safeway.git
 ```
 
-1. Order parts from [docs/BOM.md](docs/BOM.md) (~₱1,900 recommended build)
+1. Order parts from [docs/BOM.md](docs/BOM.md) (~₱2,328 recommended build)
 2. Wire per [HARDWARE.md](docs/HARDWARE.md) → flash both boards per [FIRMWARE.md](docs/FIRMWARE.md)
 3. Launch the API per [BACKEND.md](docs/BACKEND.md), point the hub firmware at it
 4. Drive past the pole — verify speed reading + photo + dashboard record + live feed
@@ -172,7 +175,7 @@ Software quality is assessed against **ISO/IEC 25010** and the IoT architecture 
 | [BLOCK-DIAGRAM.md](docs/BLOCK-DIAGRAM.md) | Hardware blocks, signals, power distribution |
 | [FLOWCHART.md](docs/FLOWCHART.md) | Runtime logic — event pipeline, server pipeline, dashboard flow |
 | [SYSTEM-ARCHITECTURE.md](docs/SYSTEM-ARCHITECTURE.md) | Layers, component responsibilities, interfaces, failure modes |
-| [wiring/circuit_image.png](wiring/circuit_image.png) | Full circuit diagram — hub, radar, break-beam, buzzer, far-post laser ([Cirkit Designer project](https://app.cirkitdesigner.com/project/192cfce5-5705-47b2-8c56-7a07da66e9da)) |
+| [wiring/circuit_image.png](wiring/circuit_image.png) | Full circuit diagram — hub, radar, both break-beams, buzzer, far-post lasers ([Cirkit Designer project](https://app.cirkitdesigner.com/project/192cfce5-5705-47b2-8c56-7a07da66e9da)) |
 
 ## Author
 
