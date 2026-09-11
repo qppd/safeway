@@ -32,6 +32,8 @@
 
 **Why two boards:** the classic AI-Thinker ESP32-CAM starves you for pins (camera + SD leaves ~2–3 usable GPIOs — no room for radar, beam receiver, and buzzer). Splitting duties gives the sensors a full 38-pin board and the camera a dedicated board — each simpler to code, flash, and debug. (The ESP32-S3 camera board now has GPIOs to spare, but the split is kept anyway: radar pulse-counting never competes with camera DMA, and a camera reboot can't drop speed measurements.) They meet over WiFi; no wires between them (the far-post laser TX is the only cable in the system — two thin wires).
 
+**Full wiring diagram:** [wiring/circuit_image.png](../wiring/circuit_image.png) · editable [Cirkit Designer project](https://app.cirkitdesigner.com/project/192cfce5-5705-47b2-8c56-7a07da66e9da)
+
 ---
 
 ## Summary Table

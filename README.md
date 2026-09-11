@@ -74,6 +74,8 @@ Core components (full verified shopping list with Lazada PH links, prices, and r
 | LM358 op-amp (fallback) | Signal conditioning if the radar variant's IF is weak |
 | 5V 2A adapters ×2 + IP68 enclosure + breadboard, jumpers, zip ties | Power, weatherproofing, assembly |
 
+**Complete wiring diagram:** [wiring/circuit_image.png](wiring/circuit_image.png) — every module, pin, and power rail in one picture; visual companion to the pin-by-pin tables in [HARDWARE.md](docs/HARDWARE.md) (editable in [Cirkit Designer](https://app.cirkitdesigner.com/project/192cfce5-5705-47b2-8c56-7a07da66e9da)).
+
 ## System Architecture
 
 ```mermaid
@@ -111,6 +113,8 @@ safeway/
 │   ├── BLOCK-DIAGRAM.md    ← hardware blocks & signal chains
 │   ├── FLOWCHART.md        ← runtime decision logic
 │   ├── SYSTEM-ARCHITECTURE.md ← layers, interfaces, failure modes
+├── wiring/
+│   └── circuit_image.png   ← full circuit diagram (Cirkit Designer)
 ├── .gitignore              ← repo hygiene rules
 └── LICENSE                 ← CC BY 4.0
 ```
@@ -168,6 +172,7 @@ Software quality is assessed against **ISO/IEC 25010** and the IoT architecture 
 | [BLOCK-DIAGRAM.md](docs/BLOCK-DIAGRAM.md) | Hardware blocks, signals, power distribution |
 | [FLOWCHART.md](docs/FLOWCHART.md) | Runtime logic — event pipeline, server pipeline, dashboard flow |
 | [SYSTEM-ARCHITECTURE.md](docs/SYSTEM-ARCHITECTURE.md) | Layers, component responsibilities, interfaces, failure modes |
+| [wiring/circuit_image.png](wiring/circuit_image.png) | Full circuit diagram — hub, radar, break-beam, buzzer, far-post laser ([Cirkit Designer project](https://app.cirkitdesigner.com/project/192cfce5-5705-47b2-8c56-7a07da66e9da)) |
 
 ## Author
 

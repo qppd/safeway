@@ -147,7 +147,7 @@ void loop() {
 
 ## 3. Sketch 2 — `safeway-hub` (38-pin sensor board)
 
-The brain: counts Doppler pulses, converts Hz→km/h, confirms with the laser break-beam, buzzes on overspeed, snapshots the photo the instant the beam breaks, and uploads the incident when the lane clears.
+The brain: counts Doppler pulses, converts Hz→km/h, confirms with the laser break-beam, buzzes on overspeed, snapshots the photo the instant the beam breaks, and uploads the incident when the lane clears. (Pin map vs the build: [full wiring diagram](../wiring/circuit_image.png).)
 
 ```cpp
 /* safeway-hub — ESP32 38-pin (sensor hub)

@@ -38,7 +38,7 @@ Everything SafeWay is built on — deliberately small, POC-friendly, and free.
 | Logic | Vanilla **JS** (`fetch` → API) | List/filter/review incidents, photo popups |
 | Live feed | `<img src="http://<cam-ip>/stream">` polled ~1/s | Browser pulls frames straight from the CAM over the LAN — no server relay |
 
-## Hardware (context — see [BOM.md](BOM.md) & [HARDWARE.md](HARDWARE.md))
+## Hardware (context — see [BOM.md](BOM.md) & [HARDWARE.md](HARDWARE.md) · [wiring diagram](../wiring/circuit_image.png))
 
 | Part | Role |
 |---|---|

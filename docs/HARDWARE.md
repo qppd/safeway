@@ -148,6 +148,10 @@ Before enclosure or firmware, verify what your radar module's OUT pin actually o
 
 ## 5. Wiring Tables
 
+> **Full wiring diagram:** [`wiring/circuit_image.png`](../wiring/circuit_image.png) — every module, pin, and power rail in one picture (editable: [Cirkit Designer project](https://app.cirkitdesigner.com/project/192cfce5-5705-47b2-8c56-7a07da66e9da)). The tables below remain the authoritative pin-by-pin reference.
+
+![SafeWay full wiring diagram](../wiring/circuit_image.png)
+
 ### 5.1 Programming setup (bench only)
 
 | Board | PC |

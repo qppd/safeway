@@ -84,5 +84,5 @@ flowchart LR
 
 ---
 
-Electrical details: [HARDWARE.md](HARDWARE.md) · pin map & wiring tables
+Electrical details: [HARDWARE.md](HARDWARE.md) · pin map & wiring tables · full schematic: [wiring/circuit_image.png](../wiring/circuit_image.png)
 Data flow logic: [FLOWCHART.md](FLOWCHART.md) · Layers & interfaces: [SYSTEM-ARCHITECTURE.md](SYSTEM-ARCHITECTURE.md)

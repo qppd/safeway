@@ -8,7 +8,7 @@ Bench validation, Doppler calibration, and the formal evaluation protocol from t
 
 ## 1. Bench Tests (before going outside)
 
-Run in order — each gates the next. With two boards, several tests are per-board.
+Run in order — each gates the next. With two boards, several tests are per-board. Before B1, eyeball the build against the [full wiring diagram](../wiring/circuit_image.png).
 
 | # | Test | Pass criteria |
 |---|---|---|
