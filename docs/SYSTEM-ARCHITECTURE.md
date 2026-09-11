@@ -31,7 +31,7 @@ flowchart TB
 |---|---|---|
 | CDM324 radar | IF pulse generation (44.7 Hz/km/h) | — |
 | Break-beam pair | presence edge across the lane | speed (radar's job) |
-| ESP32 hub | pulse counting, beam ISR+debounce, Hz→km/h, cosine correction, peak-hold, buzzer, photo fetch, incident POST | OCR, long-term storage |
+| ESP32 hub | pulse counting, beam ISR+debounce, Hz→km/h, cosine correction, peak-hold, buzzer, beam-break photo snapshot, incident POST | OCR, long-term storage |
 | ESP32-S3 CAM | capture on demand, polled live frame, microSD save | speed logic, upload |
 | FastAPI server | validation, server-side timestamps, photo storage, OCR orchestration, dashboard hosting | sensing decisions |
 | Dashboard | read, filter, review, view live feed | write raw records (only PATCH review) |
@@ -43,7 +43,7 @@ flowchart TB
 | I1 | Radar OUT → hub GPIO 34 | electrical, RISING ISR | pulses; rate ∝ speed |
 | I2 | Beam RX DO → hub GPIO 25 | electrical, CHANGE ISR | level encodes intact/broken (`BEAM_BREAKS_LOW`) |
 | I3 | Buzzer ← GPIO 27 | electrical | HIGH = over limit |
-| I4 | Hub → CAM `GET /capture` | WiFi HTTP | returns JPEG (+ SD save) |
+| I4 | Hub → CAM `GET /capture` | WiFi HTTP | fires at beam-break (vehicle at the pole — plate in frame) during an active event; fallback fetch at event close; returns JPEG (+ SD save) |
 | I5 | Browser → CAM `GET /stream` | LAN HTTP, polled ~1/s | one JPEG per request — pseudo-live, direct, no server relay |
 | I6 | Hub → API `POST /api/incidents` | WiFi HTTP JSON | device_id, speed_kph, limit_kph, doppler_hz, confirmed, photo_b64 → 201 |
 | I7 | Browser → API GET/PATCH | HTTP JSON | list/filter incidents; mark reviewed; photos |
@@ -67,7 +67,7 @@ flowchart LR
 | Failure | Immediate effect | System behavior |
 |---|---|---|
 | WiFi down at pole | upload fails | photos still saved to CAM microSD; hub retries next event; card reconciled at maintenance |
-| CAM reboot (heap) | /capture fails | hub logs incident with `confirmed` but no photo; microSD keeps prior photos; CAM auto-recovers ~60 s |
+| CAM reboot (heap) | beam-break snapshot fails (and the close-time fallback) | hub logs incident with `confirmed` but no photo; microSD keeps prior photos; CAM auto-recovers ~60 s |
 | Server down | POST fails | same as WiFi-down: evidence on microSD, dashboard obviously dark |
 | Beam mis-aimed (far post knocked) | confirmed=false always | incidents still log (radar-only); flagged in dashboard for review |
 | Radar phantom (branch/banners) | false kph ≥ 5 | beam stays intact → confirmed=false → filtered by SSU |

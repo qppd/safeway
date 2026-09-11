@@ -42,8 +42,8 @@ Speed = Doppler frequency ÷ 44.7 Hz-per-km/h
 3. A **KY-008 laser break-beam** across the lane (transmitter on a far post, receiver on the hub pole) confirms a vehicle is physically present (rejects phantom radar triggers from branches/pedestrians)
 4. If peak speed > limit (e.g. 30 km/h campus limit — `SPEED_LIMIT_KPH`):
    - **Buzzer** sounds a live warning while the vehicle is over the limit
-   - The hub fetches a photo from the **ESP32-S3 CAM board** (`/capture`), which also saves it to microSD
-   - Incident record (speed, raw Doppler Hz, confirm flag, photo) is **POSTed to the cloud API**
+   - The moment the break-beam fires — vehicle **at the pole**, plate in frame — the hub fetches a photo from the **ESP32-S3 CAM board** (`/capture`), which also saves it to microSD
+   - When the lane clears, the incident record (speed, raw Doppler Hz, confirm flag, photo) is **POSTed to the cloud API**
 5. SSU personnel watch the **live lane feed** and review violations on the dashboard; plate numbers are read from captured photos for record accuracy
 
 ## Features

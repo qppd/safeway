@@ -10,7 +10,7 @@ Everything SafeWay is built on — deliberately small, POC-friendly, and free.
 |---|---|---|
 | IDE | **Arduino IDE 2.x** | One IDE for both boards — https://arduino.cc/en/software |
 | Toolchain | **esp32 by Espressif Systems** (Arduino core v2.x+) | Board Manager URL: `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json` |
-| Board (hub) | **ESP32 Dev Module** (38-pin, CP2102 USB-UART) | Sensor hub sketch `safeway-hub` — radar pulse counting, break-beam ISR, buzzer, upload |
+| Board (hub) | **ESP32 Dev Module** (38-pin, CP2102 USB-UART) | Sensor hub sketch `safeway-hub` — radar pulse counting, break-beam ISR + beam-break photo snapshot, buzzer, upload |
 | Board (camera) | **ESP32S3 Dev Module** (ESP32-S3 WROOM N16R8 CAM; CH343P USB-UART + native USB-OTG) | Camera sketch `safeway-cam` — `/capture` JPEG, `/stream` polled live frame, microSD backup. IDE: Flash 16MB · PSRAM: OPI PSRAM |
 | Drivers | CP2102 (Silabs VCP) · CH343 (WCH) | Only if the COM port doesn't appear |
 | Libraries | WiFi · HTTPClient · base64 · SD_MMC *(bundled with core)* + **ArduinoJson** (Benoit Blanchon, via Library Manager) | Nothing else to install |

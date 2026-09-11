@@ -6,10 +6,16 @@ Runtime behavior, decision by decision — the logic view of SafeWay, matching t
 
 ## 1. Hub Main Loop — Speed Event Pipeline
 
-Every 300 ms window, the hub samples, decides, and acts:
+A beam-break fast-path rides alongside the window loop: the first beam break during an active event snapshots the photo immediately — the vehicle is at the pole, plate in frame. Every 300 ms window, the hub then samples, decides, and acts:
 
 ```mermaid
 flowchart TB
+    subgraph FAST["FAST PATH — every loop pass, before the window"]
+        BB["beam ISR raised the snapshot flag"] --> ACT{"active event and<br/>no photo buffered yet ?"}
+        ACT -- "yes" --> FETCH["GET /capture from CAM immediately —<br/>vehicle at the pole, plate in frame<br/>base64 → heap buffer"]
+        ACT -- "no — no radar event (pedestrian)<br/>or photo already held" --> DROP["drop the flag"]
+    end
+
     W["300 ms window ends"] --> COUNT["read &amp; reset pulse count<br/>hz = pulses ÷ 0.3 s<br/>kph = hz ÷ 44.7 ÷ cos θ"]
     COUNT --> FLOOR{"kph ≥ 5.0 ?<br/>(MIN_SPEED_KPH noise floor)"}
     FLOOR -- "no" --> WIFI{"WiFi connected?"}
@@ -17,7 +23,7 @@ flowchart TB
     RC --> W2["wait for next window"]
     WIFI -- "yes" --> W2
     FLOOR -- "yes" --> INEV{"inEvent ?"}
-    INEV -- "no — start event" --> START["peak = 0 · beamConfirmed = false"]
+    INEV -- "no — start event" --> START["peak = 0 · beamConfirmed = false<br/>photoReady = false — fresh buffer"]
     INEV -- "yes" --> PEAK["peak-hold: kph &gt; peak →<br/>peak = kph · peakHz = hz"]
     START --> PEAK
     PEAK --> BEAM{"beamBroken ?<br/>(set by ISR)"}
@@ -25,19 +31,21 @@ flowchart TB
     BEAM -- "no" --> BZ["buzzer ON if kph &gt; SPEED_LIMIT_KPH"]
     CONF --> BZ
     BZ --> QUIET{"lane quiet &gt; 1500 ms<br/>while inEvent ?"}
-    QUIET -- "no" --> WAIT
+    QUIET -- "no" --> W2
     QUIET -- "yes — close event" --> CLOSE["buzzer OFF · inEvent = false"]
     CLOSE --> OVER{"peak &gt; 30 km/h ?"}
     OVER -- "no" --> PASS["log pass — under limit"]
     OVER -- "yes — VIOLATION" --> BEEP["double-beep confirm"]
-    BEEP --> CAP["GET /capture from CAM →<br/>base64 straight into POST body"]
-    CAP --> POST["POST /api/incidents<br/>speed · limit · doppler_hz · confirmed · photo_b64"]
+    BEEP --> FB{"photo buffered from<br/>the beam-break fast path ?"}
+    FB -- "yes — plate frame" --> POST["POST /api/incidents<br/>speed · limit · doppler_hz · confirmed · photo_b64"]
+    FB -- "no — beam never broke<br/>or the snapshot fetch failed" --> FBF["fallback: GET /capture at close —<br/>late frame, car may be past the pole"]
+    FBF --> POST
     POST --> UP{"201 ?"}
     UP -- "yes" --> OK["uploaded"]
     UP -- "no" --> SDF["CAM microSD holds the photo"]
 ```
 
-**Beam ISR (fires any time, GPIO 25, CHANGE):** edge → debounce (edges under 50 ms apart ignored) → read level → `BEAM_BREAKS_LOW` polarity → set/clear `beamBroken`.
+**Beam ISR (fires any time, GPIO 25, CHANGE):** edge → debounce (edges under 50 ms apart ignored) → read level → `BEAM_BREAKS_LOW` polarity → set/clear `beamBroken` → if broken, raise the snapshot flag (the loop's fast path fetches the photo within milliseconds).
 
 ## 2. Beam-Confirm vs Radar-Only Event
 

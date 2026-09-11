@@ -18,7 +18,7 @@ Wiring, power, and enclosure build for the SafeWay prototype (two-board architec
 
 ## 1. System Overview
 
-A single pole-mounted unit watches the lane. The **CDM324 24 GHz Doppler radar** measures vehicle speed directly from the Doppler frequency shift; the **ESP32-S3 WROOM N16R8 CAM board** (OV5640) photographs the vehicle and serves a live stream; the **ESP32 38-pin hub** counts Doppler pulses, watches the **laser break-beam** (KY-008 transmitter on a far post, receiver module on the hub pole — a vehicle crossing the lane breaks the beam), sounds the buzzer on overspeed, fetches the photo from the CAM, and logs the incident to the cloud API. No data cables across the road — just one thin 2-wire power run to the far-post laser.
+A single pole-mounted unit watches the lane. The **CDM324 24 GHz Doppler radar** measures vehicle speed directly from the Doppler frequency shift; the **ESP32-S3 WROOM N16R8 CAM board** (OV5640) photographs the vehicle and serves a live stream; the **ESP32 38-pin hub** counts Doppler pulses, watches the **laser break-beam** (KY-008 transmitter on a far post, receiver module on the hub pole — a vehicle crossing the lane breaks the beam), sounds the buzzer on overspeed, snapshots the photo at the beam-break moment, and logs the incident to the cloud API when the lane clears. No data cables across the road — just one thin 2-wire power run to the far-post laser.
 
 ```
         Road lane  ────────────────────► direction of travel
@@ -264,7 +264,7 @@ Each board flashes itself over its own USB. The CAM board's CH343P does the flas
 - [ ] Radar faces out through ABS wall, no metal in the beam corridor
 - [ ] Receiver window drilled + sealed; far-post TX housed; 22AWG run tied down with drip loops
 - [ ] Camera window clear, desiccant in, glands sealed
-- [ ] Serial: ~0 Hz idle noise floor, Hz spikes on hand movement; beam blocked → hub prints `BEAM BROKEN`
+- [ ] Serial: ~0 Hz idle noise floor, Hz spikes on hand movement; beam blocked → hub prints `BEAM BROKEN`; beam blocked mid-event → `SNAPSHOT: ok` within ~1 s
 
 ---
 

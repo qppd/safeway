@@ -34,7 +34,7 @@ flowchart TB
     RX -- "DO → GPIO 25" --> HUB
     RADAR -- "OUT → GPIO 34" --> HUB
     HUB -- "GPIO 27" --> BUZZ
-    HUB -- "① GET /capture — fetch photo" --> CAM
+    HUB -- "① GET /capture at beam-break — vehicle at the pole" --> CAM
     HUB -- "② POST /api/incidents — JSON" --> API
     CAM -. "③ polled frame — img tag, ~1/s" .-> DASH
     API -- "④ GET incidents + photos" --> DASH
@@ -47,7 +47,7 @@ flowchart TB
 
 **Legend:** solid arrows = data · dotted arrows = power · numbered flows:
 
-- ① hub pulls the evidence photo from the CAM (WiFi)
+- ① at beam-break, the hub pulls the evidence photo from the CAM (WiFi) — vehicle at the pole, plate in frame
 - ② hub uploads the incident JSON (WiFi)
 - ③ dashboard live feed goes browser→CAM directly (LAN) — no server relay
 - ④ dashboard reads the API
@@ -79,7 +79,7 @@ flowchart LR
 | Beam level | laser RX DO → GPIO 25 | internal pull-up; divider only if DO swings to 5 V | LOW/HIGH = beam intact/broken (`BEAM_BREAKS_LOW`) |
 | Beam (optical) | KY-008 TX → receiver window | 650 nm dot across the lane | blocked = solid object crossing |
 | Alert | GPIO 27 → buzzer | direct (active 5V module) | HIGH while kph over limit |
-| Evidence | CAM `/capture` → hub (WiFi) | base64 in memory | JPEG + microSD save |
+| Evidence | CAM `/capture` → hub (WiFi) | beam-break trigger · base64 heap buffer | plate-frame JPEG (vehicle at the pole) + microSD save |
 | Incident | hub → API (WiFi) | JSON POST | speed, limit, doppler_hz, confirmed, photo |
 
 ---

@@ -7,7 +7,7 @@ Two independent sketches, one per board. Each flashes over its own USB port.
 | Sketch | Board | Job |
 |---|---|---|
 | `safeway-cam` | ESP32-S3 WROOM N16R8 CAM | photo server: `/capture` (JPEG) + `/stream` (polled live frame) + SD backup |
-| `safeway-hub` | ESP32 38-pin | Doppler speed + break-beam confirm + buzzer + fetch photo + upload to API |
+| `safeway-hub` | ESP32 38-pin | Doppler speed + break-beam confirm + buzzer + beam-break photo snapshot + upload to API |
 
 ---
 
@@ -147,7 +147,7 @@ void loop() {
 
 ## 3. Sketch 2 — `safeway-hub` (38-pin sensor board)
 
-The brain: counts Doppler pulses, converts Hz→km/h, confirms with the laser break-beam, buzzes on overspeed, fetches the photo from the CAM, uploads the incident.
+The brain: counts Doppler pulses, converts Hz→km/h, confirms with the laser break-beam, buzzes on overspeed, snapshots the photo the instant the beam breaks, and uploads the incident when the lane clears.
 
 ```cpp
 /* safeway-hub — ESP32 38-pin (sensor hub)
@@ -182,6 +182,7 @@ IRAM_ATTR void onPulse() { pulses++; }
 // --- laser break-beam: interrupt + software debounce ---
 volatile uint32_t beamEdgeMs = 0;           // last accepted edge time (ms)
 volatile bool beamBroken = false;           // true = vehicle (or object) blocking beam
+volatile bool beamSnapReq = false;          // loop: beam broke -> snapshot the plate NOW
 IRAM_ATTR void onBeamEdge() {
   uint32_t now = millis();
   if (now - beamEdgeMs < 50) return;        // debounce: ignore edges <50 ms apart
@@ -191,11 +192,14 @@ IRAM_ATTR void onBeamEdge() {
   // falling edge = beam restored.
   bool broken = BEAM_BREAKS_LOW ? (level == HIGH) : (level == LOW);
   beamBroken = broken;
+  if (broken) beamSnapReq = true;           // fast path: plate is at the pole RIGHT NOW
 }
 
 float lastKph = 0, peakKph = 0, peakHz = 0;
 uint32_t winStart = 0, lastActiveMs = 0;
 bool inEvent = false, beamConfirmed = false;
+String photoB64;                            // beam-break snapshot, reused across events
+bool photoReady = false;                    // true once this event's photo is buffered
 
 float kphFromHz(float hz) {
   float measured = hz / HZ_PER_KPH;
@@ -203,31 +207,43 @@ float kphFromHz(float hz) {
   return measured;
 }
 
-// Fetch the photo and POST the incident in one pass: base64 chunks go straight
-// into the (pre-reserved) request body — one big heap allocation, never two
-// full copies of a 40-70 KB payload competing with the WiFi stack.
-bool uploadIncident(float kph, float hz, bool confirmed) {
-  String body = "{\"device_id\":\"safeway-01\",\"speed_kph\":" + String(kph, 1)
-              + ",\"limit_kph\":" + String(SPEED_LIMIT_KPH, 0)
-              + ",\"doppler_hz\":" + String(hz, 0)
-              + ",\"confirmed\":" + (confirmed ? "true" : "false")
-              + ",\"photo_b64\":\"";
+// Snapshot fetch: fires the instant the beam breaks -- the vehicle is AT the
+// pole (1.5-3 m), plate in frame. Buffered as base64 in photoB64, which keeps
+// its heap capacity across events (assignment never shrinks an Arduino
+// String), so repeated snapshots do not fragment the heap.
+bool fetchPhoto() {
   WiFiClient wc; HTTPClient http;
   http.begin(wc, String("http://") + CAM_IP + "/capture");
-  int code = http.GET();
-  if (code == 200) {
+  http.setTimeout(4000);                    // dead CAM must not stall the loop
+  bool ok = false;
+  if (http.GET() == 200) {
     WiFiClient* s = http.getStreamPtr();
     int len = http.getSize();               // -1 if unknown
-    if (len > 0) body.reserve(body.length() + (size_t)len * 4 / 3 + 8);
+    photoB64 = "";                          // clear, keep capacity
+    if (len > 0) photoB64.reserve((size_t)len * 4 / 3 + 8);
     uint8_t buf[512]; int got;
     while ((got = s->readBytes(buf, sizeof(buf))) > 0)
-      body += base64::encode(buf, got);
+      photoB64 += base64::encode(buf, got);
+    ok = photoB64.length() > 0;
   }
-  body += "\"}";                           // no photo -> empty field; CAM microSD holds the copy
   http.end();
-  WiFiClient wc2; HTTPClient post;
-  post.begin(wc2, API_URL);
+  return ok;
+}
+
+// POST the closed event. The photo is already buffered (beam-break snapshot,
+// or the close-time fallback) -- one pre-reserved body, no inline fetch.
+bool uploadIncident(float kph, float hz, bool confirmed) {
+  String prefix = "{\"device_id\":\"safeway-01\",\"speed_kph\":" + String(kph, 1)
+                + ",\"limit_kph\":" + String(SPEED_LIMIT_KPH, 0)
+                + ",\"doppler_hz\":" + String(hz, 0)
+                + ",\"confirmed\":" + (confirmed ? "true" : "false")
+                + ",\"photo_b64\":\"";
+  String body; body.reserve(prefix.length() + photoB64.length() + 3);
+  body.concat(prefix); body.concat(photoB64); body.concat("\"}");
+  WiFiClient wc; HTTPClient post;
+  post.begin(wc, API_URL);
   post.addHeader("Content-Type", "application/json");
+  post.setTimeout(8000);
   int rcode = post.POST(body);
   post.end();
   return rcode == 200 || rcode == 201;
@@ -251,6 +267,15 @@ void setup() {
 }
 
 void loop() {
+  // --- beam-break fast path: snapshot the plate the instant the beam breaks ---
+  // The vehicle is AT the pole (1.5-3 m), plate in frame. Waiting for event
+  // close instead would photograph the lane 15-35 m behind a 30 km/h car.
+  noInterrupts(); bool snap = beamSnapReq; beamSnapReq = false; interrupts();
+  if (snap && inEvent && !photoReady) {
+    photoReady = fetchPhoto();
+    Serial.println(photoReady ? "SNAPSHOT: ok" : "SNAPSHOT: failed (fallback at close)");
+  }                                        // beam breaks outside an event: dropped
+
   // --- 300 ms Doppler window ---
   if (millis() - winStart < 300) return;
   uint32_t elapsed = millis() - winStart;
@@ -263,7 +288,8 @@ void loop() {
 
   // --- event state machine ---
   if (kph >= MIN_SPEED_KPH) {
-    if (!inEvent) { inEvent = true; peakKph = 0; peakHz = 0; beamConfirmed = false; }
+    if (!inEvent) { inEvent = true; peakKph = 0; peakHz = 0; beamConfirmed = false;
+                    photoReady = false; photoB64 = ""; }   // fresh event, fresh photo buffer
     if (kph > peakKph) { peakKph = kph; peakHz = hz; }
     lastActiveMs = millis();
 
@@ -289,8 +315,12 @@ void loop() {
         // confirm beep
         for (int i = 0; i < 2; i++) { digitalWrite(PIN_BUZZER, HIGH); delay(120);
                                      digitalWrite(PIN_BUZZER, LOW);  delay(80); }
-        // the handler below blocks ~1-5 s: discard pulses gathered during it so
-        // they don't dilute the next window's Hz reading (see design notes)
+        // fallback: beam never broke this event (or the snapshot fetch failed) --
+        // one more try; the car may already be past the pole (late frame)
+        if (!photoReady) photoReady = fetchPhoto();
+        // the handler below blocks ~1 s typical (photo already buffered):
+        // discard pulses gathered during it so they don't dilute the next
+        // window's Hz reading (see design notes)
         noInterrupts(); pulses = 0; interrupts();
         winStart = millis();
         bool ok = uploadIncident(peakKph, peakHz, beamConfirmed);
@@ -309,8 +339,10 @@ void loop() {
 - **Buzzer behavior:** sounds *while* the vehicle is actively over the limit (warns the driver in real time, per the paper's intent) + a confirmation double-beep when the violation is logged.
 - **`confirmed` field:** the break-beam broke during the radar event → a solid object physically crossed the lane → guards against radar phantoms (branches, pedestrians). Dashboard shows it; SSU filters on it.
 - **Fail-safe:** if the CAM or WiFi is down, the CAM's microSD still holds every photo (`/capture` handler saves before serving) — pull the card during maintenance ([DEPLOYMENT.md §4](DEPLOYMENT.md#4-connectivity-failover-notes)).
-- **Single-copy upload:** the photo's base64 is encoded directly into the reserved POST body — never a second 50–90 KB heap copy. Frames live in PSRAM; internal heap stays free for WiFi.
-- **Blocking close-out (known limit):** the violation handler (double-beep + photo fetch + POST) blocks the loop for ~1–5 s; pulses arriving during it are discarded, so a car entering mid-upload is measured from its next 300 ms window (peak-hold still catches its peak). A per-event async state machine is the upgrade path.
+- **Beam-break snapshot (the plate fix):** the photo is fetched the moment the break-beam fires — the vehicle is at the pole (1.5–3 m), plate readable in frame. The old close-time fetch photographed 15–35 m *behind* a 30 km/h car: at that distance a plate is ~12 px wide at SVGA — unreadable by OCR. The beam ISR raises a flag; the loop services it within milliseconds and buffers the base64 on the heap.
+- **Buffered upload:** the snapshot lives in one persistent `String photoB64` — cleared per event but its heap capacity is reused (assignment never shrinks it, so no fragmentation creep). The POST body is one pre-reserved allocation; peak hub heap ≈ 2× the photo (~120 KB at SVGA). SVGA stays the default — FRAMESIZE_HD is now tighter than the old single-copy design; heap-test before switching.
+- **Radar-only fallback:** if the beam never broke (mis-aimed far post) or the snapshot fetch failed (CAM reboot), close-out retries once — a late frame, car possibly past the pole; still better than no photo, and the CAM's microSD keeps its copy either way.
+- **Blocking close-out (known limit):** with the photo already buffered, the violation handler (double-beep + POST) blocks the loop only ~1 s typical; worst case with the CAM *and* server unreachable (two fetch timeouts + POST timeout) ~12 s. Pulses arriving during it are discarded, so a car entering mid-upload is measured from its next 300 ms window (peak-hold still catches its peak). A per-event async state machine is the upgrade path.
 - **HB100 variant?** change one constant (`HZ_PER_KPH = 19.49`) — nothing else.
 
 ---
@@ -332,7 +364,7 @@ void loop() {
 ### 4.3 Bench smoke test (before mounting anything)
 1. Hub serial shows `ACTIVE` lines when you wave a hand in front of the radar.
 2. Browser on the same WiFi: `http://<cam-ip>/stream` → a frame appears (the dashboard's live pane re-polls it ~1/s).
-3. Block/unblock the laser beam with a book at ~1 m → hub prints `BEAM BROKEN`, boot message shows beam state.
+3. Block/unblock the laser beam with a book at ~1 m → hub prints `BEAM BROKEN`, boot message shows beam state. With a radar event active (wave over the radar), the block must also print `SNAPSHOT: ok` within ~1 s — the plate-frame capture (bench test B10).
 4. With the API running ([BACKEND.md](BACKEND.md)): drive a phone-flashlight "event" over the radar at speed → dashboard shows the incident with photo.
 
 ---
@@ -348,7 +380,7 @@ void loop() {
 | `MIN_SPEED_KPH` | 5 | noise floor; raise if tree-wobble false-triggers |
 | Window | 300 ms | shorter = faster response, noisier Hz estimate |
 | Event close | 1500 ms | silence before closing an event (lane clear) |
-| Violation upload | blocking ~1–5 s | pulses during the upload are discarded; async upload = upgrade path |
+| Violation upload | blocking ~1 s typical (photo buffered at beam-break; ~12 s worst case, CAM + API down) | pulses during the upload are discarded; async upload = upgrade path |
 
 Tuning order for the field: `MIN_SPEED_KPH` first (kill phantom triggers), then `BEAM_BREAKS_LOW` from the bench polarity check, then `COSINE_ANGLE_DEG` from your measured install angle.
 

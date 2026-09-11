@@ -21,6 +21,7 @@ Run in order — each gates the next. With two boards, several tests are per-boa
 | B7 | Buzzer | Sounds while speed > limit during an event; silent otherwise |
 | B8 | WiFi + API | `POST /api/incidents` returns 201 on a simulated violation |
 | B9 | SD backup | Photo exists on the CAM's microSD after an event, even with the API down |
+| B10 | Beam-break snapshot | With `SPEED_LIMIT_KPH` temporarily set to 5: open a radar event (wave over the radar), then block the beam → hub prints `SNAPSHOT: ok` **within ~1 s of the block** (not at event close); the logged incident carries the photo |
 
 ## 2. Speed Calibration (the critical test)
 
@@ -68,7 +69,8 @@ The measurement chain is: **Doppler Hz ÷ 44.7 = km/h** (+ cosine correction). C
 ## 3. Response Time
 
 - Radar detects overspeed → buzzer ON: ≤ ~400 ms worst case (a reading only exists at each 300 ms window close — the window is the resolution).
-- Event close (lane clear + 1.5 s) → record visible in dashboard: stopwatch 5 runs; POC target **≤ 10 s** (photo fetch + base64 + upload dominate; sub-5 s on campus LAN).
+- Event close (lane clear + 1.5 s) → record visible in dashboard: stopwatch 5 runs; POC target **≤ 10 s** (the POST dominates — the photo is already buffered from the beam-break snapshot; sub-5 s on campus LAN).
+- Beam-break → `SNAPSHOT: ok` on serial: ≤ ~1 s from the block (CAM fetch time).
 - Log both in the template below.
 
 ## 4. Reliability / Soak Test
@@ -147,5 +149,6 @@ Longest outage: ____ min   SD photos present: Y/N   CAM power-cycle recovery: Y/
 | OCR < 50% accuracy | Photo angle/distance wrong for plate size | Camera closer to plate height; capture at trigger zone |
 | Dashboard misses records | Upload timeout on big photos | Lower CAM `frame_size` to VGA, or serve on campus LAN |
 | CAM stream freezes | CAM heap fragmentation after days | CAM reboots nightly (add `ESP.restart()` at 02:00 in CAM sketch) |
+| `SNAPSHOT: failed` at beam-break | CAM rebooting / wrong `CAM_IP` | close-time fallback retries once; verify CAM IP + `cam-status` |
 
 Next: install on site → [DEPLOYMENT.md](DEPLOYMENT.md)
