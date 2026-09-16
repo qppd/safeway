@@ -63,16 +63,17 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    S1["Supply #1 · far post<br/>compact 5 V ≥1 A"] -.-> TX1V["KY-008 TX #1<br/>under 30 mA"]
-    S2["Supply #2 · far post<br/>compact 5 V ≥1 A"] -.-> TX2V["KY-008 TX #2<br/>under 30 mA"]
-    S3["Supply #3 · hub pole<br/>5 V 2 A"] -.-> HUBV["38-pin hub VIN<br/>board + WiFi bursts"]
+    S1["Supply #1 · far post<br/>5 V ≥1 A + 18650 UPS<br/>(HARDWARE §5.5)"] -.-> TX1V["KY-008 TX #1<br/>under 30 mA"]
+    S2["Supply #2 · far post<br/>5 V ≥1 A + 18650 UPS<br/>(HARDWARE §5.5)"] -.-> TX2V["KY-008 TX #2<br/>under 30 mA"]
+    S3["Supply #3 · hub pole<br/>5 V 2 A + 18650 UPS<br/>(HARDWARE §5.5)"] -.-> HUBV["38-pin hub VIN<br/>board + WiFi bursts"]
     S3 -.-> RRV["CDM324 VCC<br/>~30–60 mA"]
     S3 -.-> LRV["Laser receiver #1 VCC<br/>~10 mA"]
-    S4["Supply #4 · hub pole<br/>5 V 2 A"] -.-> CAMV["ESP32-S3 WROOM CAM 5 V<br/>board + OV5640 + WiFi + SD"]
+    S4["Supply #4 · hub pole<br/>5 V 2 A + 18650 UPS<br/>(HARDWARE §5.5)"] -.-> CAMV["ESP32-S3 WROOM CAM 5 V<br/>board + OV5640 + WiFi + SD"]
     S4 -.-> LRV2["Laser receiver #2 VCC<br/>~10 mA"]
 ```
 
 - Four supplies, zero shared rails ⇒ a camera reboot can never brown-out the radar mid-measurement; a dead far-post supply can never dim the other beam; a hub buzzer/WiFi burst can never ripple the CAM's rail.
+- **Every supply carries its own 18650 UPS branch** (TP4056 → cell → MT3608 @ 5.0 V, mains behind an SS34) — a mains outage bumps every rail, including both far-post lasers, for 4 h. No fuse, no paralleling: one protected cell per rail.
 - **No cable crosses the road** — each far-post TX is self-powered (compact USB charger inside its housing).
 - One rail cap recommended on each board's supply when bench-testing from a single source.
 
@@ -82,7 +83,7 @@ flowchart LR
 
 | Signal | Source → Destination | Conditioning | Meaning |
 |---|---|---|---|
-| Doppler IF pulses | CDM324 OUT → GPIO 34 | divider **if** §3 scope check reads >3.3 V | pulse rate = 44.7 Hz per km/h |
+| Doppler IF pulses | CDM324 OUT → LM358 → GPIO 34 | two-stage ×101 amplifier, 2.5 V-biased ([HARDWARE §4](HARDWARE.md#4-lm358-signal-conditioner-radar-chain)) — direct only if the §3 scope check shows a healthy swing | pulse rate = 44.7 Hz per km/h |
 | Beam #1 level | laser RX #1 DO → GPIO 25 | internal pull-up; divider only if DO swings to 5 V | LOW/HIGH = beam intact/broken (`BEAM_BREAKS_LOW`) |
 | Beam #2 level | laser RX #2 DO → GPIO 21 (CAM) | `INPUT_PULLUP`; divider **mandatory** if DO >3.3 V (S3 not 5 V tolerant) | drives the CAM's self-triggered snapshot (`CAM_BEAM_BREAKS_LOW`) |
 | Beam #1/#2 (optical) | KY-008 TX #1/#2 → receiver windows | 650 nm dots across the lane, offset a few cm | blocked = solid object crossing |
