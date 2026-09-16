@@ -72,8 +72,8 @@ Core components (full verified shopping list with Lazada PH links, prices, and r
 | KY-008 laser TX + receiver pairs ×2 | Beam #1: presence confirmation (hub GPIO 25) · Beam #2: CAM snapshot trigger (GPIO 21) — far-post TXs, hub-pole receivers |
 | Active buzzer 5V | Overspeed alert |
 | microSD 16GB Class 10 | Local photo backup on the CAM board |
-| LM358 op-amp (fallback) | Signal conditioning if the radar variant's IF is weak |
-| 5V 2A adapters ×2 + USB chargers ×2 (far post) + IP68 enclosure + breadboard, jumpers, zip ties | Four independent supplies, weatherproofing, assembly |
+| LM358 op-amp | Radar signal conditioner — CDM324 → LM358 → GPIO 34 (see [HARDWARE.md §4](docs/HARDWARE.md#4-lm358-signal-conditioner-radar-chain)) |
+| 5V 2A adapters ×2 + USB chargers ×2 (far post) + 18650 UPS backup per supply (16 cells, 4 devices, 4 h runtime) + IP68 enclosure + breadboard, jumpers, zip ties | Four independent supplies with battery backup, weatherproofing, assembly |
 
 **Complete wiring diagram:** [wiring/circuit_image.png](wiring/circuit_image.png) — every module, pin, and power rail in one picture; visual companion to the pin-by-pin tables in [HARDWARE.md](docs/HARDWARE.md) (editable in [Cirkit Designer](https://app.cirkitdesigner.com/project/192cfce5-5705-47b2-8c56-7a07da66e9da)).
 

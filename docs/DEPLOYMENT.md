@@ -33,7 +33,7 @@ Criteria for the pilot lane — walk candidates with SSU:
 - [ ] **DHCP reservation set on the campus router** for both boards (hub + CAM) — static IPs make everything findable forever
 - [ ] Enclosure sealed, desiccant fresh, camera window clean, radar face within 2 cm of the ABS wall
 - [ ] microSD formatted, inserted, tested
-- [ ] Spare adapter, fuse, zip ties, and screwdriver in the kit box
+- [ ] Spare adapter, zip ties, and screwdriver in the kit box
 - [ ] SSU informed of install date/time (traffic marshalling for 1–2 h)
 
 ## 3. Physical Install
@@ -84,7 +84,8 @@ Leave printed copies: this guide's §5–7, the dashboard URL, and the fault tab
 | Monthly | Clean camera window + receiver window + radar-facing ABS wall (outside face); check desiccant |
 | Monthly | Backup `safeway.db` + `uploads/` off the server |
 | Quarterly | Re-run the 10-pass calibration ([TESTING.md §2](TESTING.md#2-speed-calibration-the-critical-test)) at the site; re-check radar aim angle + re-torque mounts |
-| Yearly | Battery-free devices — but plan adapter/cable replacement every 2 typhoon seasons |
+| Quarterly | Check 18650 UPS cells ([HARDWARE.md §5.5](HARDWARE.md#55-battery-backup-ups-option--one-18650-per-supply)): pull-the-plug test, cell voltage ≥ 3.9 V under load, no holder corrosion |
+| Yearly | Replace 18650 cells (~800 cycles rated); plan adapter/cable replacement every 2 typhoon seasons |
 
 ### Typhoon season prep
 

@@ -24,6 +24,8 @@ Run in order — each gates the next. With two boards, several tests are per-boa
 | B9 | SD backup | Photo exists on the CAM's microSD after an event, even with the API down |
 | B10 | Beam-break snapshot | With `SPEED_LIMIT_KPH` temporarily set to 5: open a radar event (wave over the radar), then block beam #2 → CAM caches the frame; the hub's fetch (block beam #1 too) returns the **cached beam-moment JPEG** — hub prints `SNAPSHOT: ok` **within ~1 s of the block** (not at event close); the logged incident carries the photo |
 | B11 | Stale-cache fallback | Wait > `BEAM2_FRESH_MS` (8 s) after a beam-#2 break, then request `/capture` → CAM serves a **live grab**, not the stale plate frame |
+| B12 | UPS transfer (per [HARDWARE.md §5.5](HARDWARE.md#55-battery-backup-ups-option--one-18650-per-supply), each supply) | Pull mains while under load: rail holds ≥ 4.9 V, hub serial keeps counting Hz, CAM stream doesn't drop; mains back → TP4056 charging LED lights |
+| B13 | UPS runtime soak (each hub + CAM rail, once per device before acceptance) | Run the rail on battery only for 4 h under normal load: still ≥ 4.9 V at hour 4, hub logs events the whole time, cell recharges fully overnight afterwards |
 
 ## 2. Speed Calibration (the critical test)
 
@@ -66,7 +68,7 @@ The measurement chain is: **Doppler Hz ÷ 44.7 = km/h** (+ cosine correction). C
 |---|---|---|
 | Error constant multiplicative (~all reads −5%) | Cosine error — radar angled off-axis | Measure the mount angle; set `COSINE_ANGLE_DEG` |
 | Reads ~½ expected | Radar module variant with different IF scaling (or LM358 amp clipping) | Re-run [HARDWARE.md §3](HARDWARE.md#3-if-signal-verification-do-this-first); if constant factor confirmed, recalibrate `HZ_PER_KPH` and document it |
-| Random ±30% | Weak IF, noisy trigger | Fit the LM358 conditioner ([HARDWARE.md §4](HARDWARE.md#4-fallback-lm358-signal-conditioner)) |
+| Random ±30% | Weak IF, noisy trigger | Check the LM358 conditioner build ([HARDWARE.md §4](HARDWARE.md#4-lm358-signal-conditioner-radar-chain)) — verify the 2.5 V bias node and re-run the §3 hand-wave test |
 
 ## 3. Response Time
 
@@ -81,6 +83,7 @@ The measurement chain is: **Doppler Hz ÷ 44.7 = km/h** (+ cosine correction). C
 - Pass: no reboots, no missed events, no WiFi drops > 3 min, CAM microSD has all photos, hub serial shows no brownout resets.
 - **Two-board specific:** power-cycle the CAM mid-soak (simulating a camera crash). Hub must keep measuring; the next violation photo fetch reconnects automatically. Dashboard's `cam-status` should flip to offline and back.
 - Watch hub serial for brownout resets — a reset means power rail problems ([HARDWARE.md §5.4](HARDWARE.md#54-power-design--four-independent-supplies)).
+- With the UPS fitted, add a 4 h battery-only run per hub + CAM rail (bench test B13, [HARDWARE.md §5.5](HARDWARE.md#55-battery-backup-ups-option--one-18650-per-supply)) — one full outage per device before acceptance.
 
 ## 5. Usability (SSU panel)
 
@@ -132,6 +135,15 @@ Reboots (hub/CAM): ____/____   Missed events: ____/____   WiFi drops: ____
 Longest outage: ____ min   SD photos present: Y/N   CAM power-cycle recovery: Y/N
 ```
 
+### UPS runtime log (B13 — one per device)
+
+```
+Device/Pole: ____   Rail (hub / CAM / TX#1 / TX#2): ____   Date: ____
+Start: ____   End: ____ (4 h)
+Cell voltage start: ____ V   At hour 4: ____ V   Rail at hour 4: ____ V
+Events logged during outage: ____   Transfer clean (B12): Y/N   Full recharge overnight: Y/N
+```
+
 ### Incident log (used for the paper's data)
 
 | Time | Speed (kph) | Doppler Hz | Confirmed | Plate OCR | OCR conf. | Reviewed by |
@@ -154,5 +166,8 @@ Longest outage: ____ min   SD photos present: Y/N   CAM power-cycle recovery: Y/
 | Dashboard misses records | Upload timeout on big photos | Lower CAM `frame_size` to VGA, or serve on campus LAN |
 | CAM stream freezes | CAM heap fragmentation after days | CAM reboots nightly (add `ESP.restart()` at 02:00 in CAM sketch) |
 | `SNAPSHOT: failed` at beam-break | CAM rebooting / wrong `CAM_IP` | close-time fallback retries once; verify CAM IP + `cam-status` |
+| Rail sags the instant mains is pulled | MT3608 output set below rail voltage · SS34 reversed · cell uncharged | Re-set MT3608 to 5.0 V no-load; check SS34 band faces the rail; charge the cell fully before install |
+| Battery bank drains in days with mains present | SS34 missing/backwards — battery branch backfeeds through the charger | Fit/verify SS34 on the **mains branch only**; confirm no voltage at TP4056 OUT with mains on |
+| Hub speed readings go erratic during outages | Rail cap too small for the transfer instant | Keep the 470–1000 µF rail cap; re-run B12 |
 
 Next: install on site → [DEPLOYMENT.md](DEPLOYMENT.md)

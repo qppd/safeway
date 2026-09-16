@@ -31,7 +31,7 @@ flowchart LR
         direction TB
         RX1["Laser receiver #1 module<br/>DO → GPIO 25<br/>event confirm — beam #1"]
         RX2["Laser receiver #2 module<br/>DO → GPIO 21 on CAM<br/>self-triggered snapshot"]
-        HUB["ESP32 38-pin HUB<br/>CDM324 radar OUT → GPIO 34<br/>Buzzer → GPIO 27<br/>WiFi — fetches CAM photo, POSTs to API"]
+        HUB["ESP32 38-pin HUB<br/>CDM324 → LM358 → GPIO 34<br/>Buzzer → GPIO 27<br/>WiFi — fetches CAM photo, POSTs to API"]
         CAM["ESP32-S3 WROOM CAM<br/>OV5640 /capture — cached plate frame<br/>/stream — polled live frame<br/>microSD — local backup of every photo"]
     end
     CLOUD["☁ Cloud API + Dashboard"]
@@ -71,7 +71,7 @@ Standard DOIT DevKit v1-compatible 38-pin board (CP2102, Type-C or micro-USB). A
 
 | GPIO | SafeWay assignment | Notes |
 |---|---|---|
-| **34** (input-only) | **CDM324 OUT** — Doppler pulses | Input-only pin: the radar only ever drives it; ideal |
+| **34** (input-only) | **CDM324 OUT via LM358 conditioner (§4)** — Doppler pulses | Input-only pin: the conditioner only ever drives it; ideal |
 | **25** | **Laser receiver #1 DO** (beam broken/OK) | digital in; receiver is a 3.3 V-safe comparator output — see §5.2 note |
 | **27** | Buzzer + | any OUTPUT-capable GPIO |
 | 32/33 | spare (I2C bus) | future sensors |
@@ -132,20 +132,32 @@ Before enclosure or firmware, verify what your radar module's OUT pin actually o
 
 ---
 
-## 4. Fallback LM358 Signal Conditioner
+## 4. LM358 Signal Conditioner (radar chain)
 
-*Skip if §3 showed healthy pulses.* Repair path if your CDM324 variant's IF is too weak to trigger a digital input (millivolt-level — some bare-sensor boards ship without an amplifier stage despite listing photos):
+The hub's radar chain is **CDM324 → LM358 (two-stage ≈ ×101 amplifier) → GPIO 34**. Run §3 first anyway: if your module's OUT already swings healthy pulses it can drive GPIO 34 directly, but the LM358 stage is fitted in this build so even weak-IF module batches produce a clean, mid-rail-biased trigger.
+
+**Parts (BOM #5):** LM358 DIP-8 · C1 10 µF, C2 2.2 µF ×2, C3 10 µF (electrolytic, + toward the previous stage) · 10 kΩ ×4, 1 MΩ ×2 · 100 nF ceramic · 8-pin socket.
 
 ```
- CDM324 IF ──[C1 10µF]──┬──[R1 10k]── GND          (bias IF at Vcc/2)
-                        ├──► LM358 A: non-inv. gain ≈ 100 (R2 1M / R3 10k)
-                        │      band-pass ≈ 7 Hz–6 kHz  (0.16–138 km/h)
-                        └──► LM358 B: gain ≈ 100      → OUT to GPIO 34
+ CDM324 OUT ──[C1 10µF]──┬──[R1 10k]── GND
+                         │  [R1b 10k from 5 V]     (bias IF at Vcc/2 = 2.5 V)
+                         ├──► pin 3 (A+)
+ pin 2 (A−) ──[R3 10k in series with C2 2.2µF]── GND
+ pin 1 (A out) ──[R2 1M]── pin 2                 (gain ≈ 101)
+ pin 1 ──[C3 10µF]──► pin 5 (B+)
+ pin 6 (B−) ──[R3 10k in series with C2 2.2µF]── GND
+ pin 7 (B out) ──[R2 1M]── pin 6                 (gain ≈ 101)
+ pin 7 ──► ESP32 GPIO 34
+ pin 8 = 5 V (100 nF ceramic to GND right at the IC) · pin 4 = GND
+ pins 3 & 5 tie to the 2.5 V bias node
 ```
 
-- **Easiest:** the prebuilt "LM358 100× Gain Signal Amplification Module" (₱148, BOM) — IF into IN, OUT to GPIO 34, trim idle to mid-rail.
-- **Bare IC:** LM358 DIP-8 (₱25/2pcs) on the breadboard, 5 V rail, stages biased at 2.5 V.
-- Re-verify with §3's hand-wave test after amplifying — you want pulses swinging 0–3.3+ V.
+- **Gain per stage ≈ 101** (R2/R3); two stages ≈ ×10,000. The C2 caps set DC gain to 1 — outputs idle at the 2.5 V bias instead of slamming a rail — and with the LM358's ~1 MHz GBW the chain passes ≈ **7 Hz–6 kHz** (≈ 0.16–138 km/h).
+- **Power from the 5 V rail (supply #3), GND common with the ESP32.** Pin 7 idles ~2.5 V and swings 0–~3.5 V — safe for the WROOM-32's GPIO 34.
+- **Bench check after building:** repeat §3's hand-wave test — ~0 Hz idle, hundreds of Hz on hand movement at 1–3 m. A flat pinned output means a stage is railing: re-check the 2.5 V bias node and C2 polarity.
+- **Prebuilt shortcut:** the "LM358 100× Gain Signal Amplification Module" (₱148, BOM) replaces the discrete build — IF into IN, OUT to GPIO 34, trim idle to mid-rail.
+
+**Reference builds:** [Easy HB100 Amplifier (Instructables)](https://www.instructables.com/Easy-HB100-Amplifier/) — same LM358 topology · [3zuli/HB100_test (GitHub)](https://github.com/3zuli/HB100_test) — doppler + pre-amp + Arduino code. For the radar itself: [kd8bxp/24ghzdoppler](https://github.com/kd8bxp/24ghzdoppler) (ICStation CDM324 test code) · [Andreas Spiess #181 — DIY radar speed gun for Arduino/ESP32](https://www.youtube.com/watch?v=Kzsh59TM4MY).
 
 ---
 
@@ -170,7 +182,9 @@ Each board flashes itself over its own USB. The CAM board's CH343P does the flas
 |---|---|---|
 | CDM324 radar | VCC | 5V rail (supply #3) |
 | | GND | GND |
-| | OUT | **GPIO 34** (via divider if §3 measured >3.3 V) |
+| | OUT | C1 10 µF → **LM358 stage A input** (§4) |
+| **LM358 conditioner** (§4) | V+ / GND (pins 8 / 4) | 5V rail (supply #3) / GND — 100 nF at the IC |
+| | OUT (pin 7) | **GPIO 34** (idles ~2.5 V — safe) |
 | **Laser receiver #1** (hub pole) | VCC | 5V rail (supply #3) |
 | | GND | GND |
 | | DO | **GPIO 25** (`INPUT_PULLUP`) |
@@ -208,8 +222,8 @@ Each board flashes itself over its own USB. The CAM board's CH343P does the flas
 flowchart LR
     subgraph FARPOST["FAR POST — no cable crosses the road"]
         direction TB
-        S1["Supply #1 — 5V 1A+<br/>compact USB charger / DC adapter"]
-        S2["Supply #2 — 5V 1A+<br/>compact USB charger / DC adapter"]
+        S1["Supply #1 — 5V 1A+<br/>+ 18650 backup (§5.5)"]
+        S2["Supply #2 — 5V 1A+<br/>+ 18650 backup (§5.5)"]
         TX1["KY-008 TX #1<br/>under 30 mA, always-on"]
         TX2["KY-008 TX #2<br/>under 30 mA, always-on"]
         S1 --> TX1
@@ -217,7 +231,7 @@ flowchart LR
     end
     subgraph HUBPOLE["HUB POLE — enclosure at the outlet"]
         direction TB
-        S3["Supply #3 — 5V 2A"]
+        S3["Supply #3 — 5V 2A<br/>+ 18650 backup (§5.5)"]
         HUB["38-pin HUB"]
         RADAR["CDM324 radar<br/>30–60 mA"]
         RX1["Laser receiver #1<br/>≈5 mA"]
@@ -226,7 +240,7 @@ flowchart LR
         S3 --> RADAR
         S3 --> RX1
         S3 --> BUZ
-        S4["Supply #4 — 5V 2A"]
+        S4["Supply #4 — 5V 2A<br/>+ 18650 backup (§5.5)"]
         CAM["ESP32-S3 CAM<br/>board reg makes 3.3V"]
         RX2["Laser receiver #2<br/>≈5 mA"]
         S4 --> CAM
@@ -234,11 +248,48 @@ flowchart LR
     end
 ```
 
-- **Four supplies, zero shared rails by design:** each far-post laser TX is independent (a dead supply #2 can't dim beam #1), the hub's measurement rail is isolated from the CAM's camera/WiFi peaks (a CAM reboot can't brown-out the radar), and the CAM's rail is isolated from the hub's buzzer/WiFi bursts. No supply failure cascades.
+- **Four supplies, zero shared rails by design:** each far-post laser TX is independent (a dead supply #2 can't dim beam #1), the hub's measurement rail is isolated from the CAM's camera/WiFi peaks (a CAM reboot can't brown-out the radar), and the CAM's rail is isolated from the hub's buzzer/WiFi bursts. No supply failure cascades. **Each supply carries its own 18650 UPS branch (§5.5)** — a mains outage bumps every rail to battery with no controller or relay.
 - **Far-post supplies:** any compact 5V ≥1A source — a USB charger + short cable, a small DC adapter, or a power-bank-for-mains style module — inside each TX's weatherproof housing. No cable crosses the road.
 - Add a 470–1000 µF electrolytic across the hub's 5V rail (supply #3).
 - **Radar stability:** keep a cap near the radar's VCC/GND pair so WiFi bursts don't modulate the radar supply (phantom low-speed readings).
 - **Bench alternative:** for bench testing you can consolidate to one supply per enclosure side + beefy 1000 µF rail caps — acceptable for testing only; field builds keep all four isolated.
+
+### 5.5 Battery backup (UPS option) — one 18650 per supply
+
+Each of the four supplies gets an identical bolt-on backup so a mains outage never stops a measurement, a snapshot, or a beam:
+
+```
+ MAINS 220 V
+    │
+ ┌──▼──────────────┐ 5 V ──[SS34 Schottky]──┬──► supply rail (hub / CAM / TX)
+ │ wall adapter    │                        │
+ │ (BOM #10/#12)   │                        │
+ └─────────────────┘                        │
+        5 V                                 │
+        └──► TP4056 ── 18650 bank ──► MT3608 (set 5.0 V) ──┘
+             (1 A)     in holder
+```
+
+- **Mains wins while present:** the adapter holds its rail at ~5.1–5.2 V; the battery branch sits behind an MT3608 set to **5.0 V**, so it sources only when the rail sags below that (outage/brownout). Bumpless transfer — no controller, no relay. The **SS34 blocks the rail from backfeeding the charger** — fit it on the mains branch only.
+- **Charging:** TP4056 charges at 1 A — ~4 h for a single 3500 mAh cell. Protected cells (LiitoKala Lii-35S+) cut off at 2.5 V; the MT3608's UVLO ends discharge before damage. No fuse and no paralleling in this design — each rail carries exactly one protected cell.
+- **Keep the 470–1000 µF rail cap** — it carries the WiFi/buzzer burst during the transfer instant.
+
+**Sizing — 4 h max runtime from measured rail currents:**
+
+| Rail | Draw | Energy for 4 h | 18650 3500 mAh cells | Depth of discharge |
+|---|---|---|---|---|
+| Supply #3 — hub (radar + LM358 + RX1 + buzzer + WiFi) | ≈ 350 mA | 1.4 Ah ÷ 0.85 ≈ 1.65 Ah | **1** | ≈ 47% |
+| Supply #4 — CAM (S3 + OV5640 + RX2 + stream) | ≈ 350 mA | same | **1** | ≈ 47% |
+| Supply #1 — KY-008 TX #1 (far post) | < 30 mA | 0.12 Ah ÷ 0.85 ≈ 0.14 Ah | **1** | ≈ 4% |
+| Supply #2 — KY-008 TX #2 (far post) | < 30 mA | same | **1** | ≈ 4% |
+
+**Per device: 4 cells (one per supply — hub, CAM, and both far-post laser TXs) → 4 devices/poles = 16 cells.** One cell per rail means no paralleling and no balancing; the hub/CAM cells see ≤ ≈ 47% DoD per outage — gentle on cycle life, and the TX cells barely notice it (≈ 4%).
+
+- **Far post gets a battery too:** the TX's backup branch (charger + single holder + cell + TP4056/MT3608/SS34) needs a slightly bigger housing — use a small IP65 box (BOM Deluxe option) instead of tucking the charger under the post cap. The beam never dies in an outage.
+
+**Bench validation before deployment:** pull the mains plug — the rail must hold ≥ 4.9 V, the hub serial keeps counting Hz, the CAM stream doesn't drop. Recharge and repeat; log one full 4 h outage test per device before acceptance (TESTING.md).
+
+Shopping list with verified Lazada links: **[BOM.md — Battery Backup Add-On](BOM.md#battery-backup-add-on-ups--18650--4-devicespoles)**.
 
 ---
 
@@ -257,7 +308,7 @@ flowchart LR
 2. **Radar mounting:** 24 GHz passes through **ABS plastic** (not metal). Mount the CDM324 **inside** the sealed box facing out through the plastic wall — zero apertures for rain. Antenna face within ~2 cm of the wall.
    - Never put metal (screws, brackets, foil) between radar and road.
 3. **Laser receiver placement (×2):** mount receiver #1 and receiver #2 inside the enclosure side by side behind a small clear window each (drill ~10–12 mm, seal with silicone or a glue-lined washer) — each photodetector just needs to see its far-post dot. Aim both windows at the **beam axis** (straight across the lane).
-4. **Far-post KY-008 TX ×2:** each in its own small weatherproof housing (or tucked under the post cap), dot aimed at its receiver window, **its own 5V supply inside the housing** (compact USB charger or DC adapter). Offset the two dots a few cm along the lane so the beams break in sequence as a vehicle passes.
+4. **Far-post KY-008 TX ×2:** each in its own weatherproof housing (a small IP65 box — it now holds the 5V supply **plus the 18650 UPS branch**: holder + TP4056/MT3608/SS34), dot aimed at its receiver window. Offset the two dots a few cm along the lane so the beams break in sequence as a vehicle passes.
 5. **Buzzer:** small drilled port (8 mm) covered with tape.
 6. **Camera window:** large cutout + clear acrylic/PETG sealed with silicone. OV5640 must see the lane at plate height.
 7. **Cable glands:** one for DC power in (supply #3), one for supply #4, one spare for future sensor. Glue-lined heat shrink. (No gland for the far-post run — nothing crosses the road anymore.)
@@ -289,14 +340,15 @@ flowchart LR
 ## 9. Assembly Checklist
 
 - [ ] §3 IF verification done — waveform confirmed, amplitude recorded, divider fitted if needed
-- [ ] Hub pins: radar→34, receiver #1 DO→25 (divider only if measured >3.3 V), buzzer→27
+- [ ] Hub pins: radar→LM358 (§4)→34, receiver #1 DO→25 (divider only if measured >3.3 V), buzzer→27
 - [ ] CAM pins: receiver #2 DO→GPIO 21 (S3 — divider **mandatory** if DO >3.3 V), `CAM_BEAM_BREAKS_LOW` polarity recorded
 - [ ] KY-008 bench check ×2: TX dots visible, both receiver LEDs flip when blocked, both DO polarities recorded
 - [ ] Both boards power up independently on their own supplies (#3 hub, #4 CAM); TX #1/#2 each powered by supplies #1/#2 at the far post
 - [ ] CAM board: microSD FAT32 in before power; camera focused on trigger zone
 - [ ] 5V rails measure 4.8–5.2 V under WiFi load; cap installed near the radar
+- [ ] 18650 backup fitted per §5.5: SS34 orientation checked, MT3608 pre-set to 5.0 V before connecting a load, cells fully charged before install; pull-the-plug test passed
 - [ ] Radar faces out through ABS wall, no metal in the beam corridor
-- [ ] Both receiver windows drilled + sealed; both far-post TX housings sealed with their supplies inside; **no cable crosses the road**
+- [ ] Both receiver windows drilled + sealed; both far-post TX housings sealed with their supplies + 18650 UPS branches inside (IP65 box); **no cable crosses the road**
 - [ ] Camera window clear, desiccant in, glands sealed
 - [ ] Serial: ~0 Hz idle noise floor, Hz spikes on hand movement; beam #1 blocked → hub prints `BEAM BROKEN`; beam #2 blocked → CAM serial prints `BEAM2 SNAP → SD ok`; beam blocked mid-event → hub's photo fetch returns the CAM-cached frame
 

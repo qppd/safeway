@@ -45,7 +45,7 @@ flowchart LR
 | 2 | ESP32-S3 WROOM N16R8 CAM board + OV5640 5MP camera | 1 | ₱613 | ₱613 | 5.0 (3) · 91% store | — |
 | 3 | ESP32 38-pin dev board, CP2102, Type-C (DIYUSER) | 1 | ₱196 | ₱196 | 4.8★ (81) | 822 |
 | 4 | KY-008 laser transmitter + laser receiver module pair (Layad Circuits) | **2 pairs** | ₱253 | ₱506 | 97% seller · 4.7K sold store | — |
-| 5 | LM358 dual op-amp DIP-8 (2 pcs, fallback conditioner) | 1 pack | ₱25 | ₱25 | — | 370 |
+| 5 | LM358 dual op-amp DIP-8 (2 pcs, radar signal conditioner) | 1 pack | ₱25 | ₱25 | — | 370 |
 | 6 | Active buzzer 5V | 1 | ₱30 | ₱30 | 5.0 (42) | 174 |
 | 7 | Kingston microSD 16GB Class 10 | 1 | ₱219 | ₱219 | 4.8 (265) | 1.0K |
 | 8 | Dupont jumper wires 40-pin (M-F / M-M) | 2 sets | ₱39 | ₱78 | 4.8 (2,814) | 23.2K |
@@ -114,11 +114,11 @@ The E-WOITD module sold on Lazada PH is the ICStation-style board with onboard t
 - KY-008 pinout: **S = signal** (tie to 5 V for always-on — simplest), **middle = +5 V**, **− = GND**. Draws < 30 mA.
 - **Safety note:** 5 mW / 650 nm is Class 3R-adjacent — never look into the beam, don't aim at eye level of drivers/pedestrians; mount it low (plate height) and aim it across the lane at the receiver, not along it.
 
-### 5. LM358 Dual Op-Amp DIP-8 (2 pcs) — signal conditioning fallback
+### 5. LM358 Dual Op-Amp DIP-8 (2 pcs) — radar signal conditioner
 - **Price:** ₱25.00 (2 pieces) · **Sold:** 370 · **Location:** Bulacan
 - **URL:** https://www.lazada.com.ph/products/pdp-i3251664504.html *(same seller family as prior verified listing — if rotated: search "LM358 DIP" pick Bulacan seller)*
 - Alternative prebuilt: "LM358 100× Gain Signal Amplification Module" ₱148, Bulacan — zero soldering if your module's IF output turns out weak.
-- Note: Only needed if your CDM324 variant's output is too weak or already-digitized to pulse-count ([HARDWARE.md §4](HARDWARE.md#4-fallback-lm358-signal-conditioner)). Most modules don't need it.
+- Note: Wired into this build's radar chain (CDM324 → LM358 → GPIO 34) so weak-IF module batches still trigger the hub cleanly — full schematic in [HARDWARE.md §4](HARDWARE.md#4-lm358-signal-conditioner-radar-chain). If your module's OUT already swings healthy pulses (§3 bench check), it can also run direct.
 
 ### 6. Active Buzzer 5V (alarm/alert)
 - **Price:** ₱30.00 · **Rating:** 5.0 (42) · **Sold:** 174 · **Location:** Metro Manila
@@ -157,11 +157,32 @@ The E-WOITD module sold on Lazada PH is the ICStation-style board with onboard t
 
 ### 12. Compact 5V USB Charger (far-post laser TX supply) — 2 pcs
 - **Price:** ≈ ₱55 each (any compact 5V ≥1A USB charger + short USB cable works — Lazada generic, e.g. https://www.lazada.com.ph/products/pdp-i3100389517.html or search "5V 1A USB charger")
-- Role: supplies #1 and #2 — each KY-008 TX on the far post runs on its own charger inside its housing (TX draws < 30 mA). This is what frees the system from the old 22AWG cross-road run: **no cable crosses the road at all**. Bench alternative: any USB power bank or spare phone charger for testing.
+- Role: supplies #1 and #2 — each KY-008 TX on the far post runs on its own charger inside its housing (TX draws < 30 mA). With the battery backup ([§5.5](HARDWARE.md#55-battery-backup-ups-option--one-18650-per-supply)) the charger now feeds the UPS branch: charger → SS34 → TX rail, charger → TP4056 → 18650 → MT3608 → TX rail.
 
 ### 13. Cable/Zip Ties 100pcs (mounting + cable management)
 - **Price:** ₱12.00 · **Sold:** 40K+ · **Location:** Bulacan
 - **URL:** https://www.lazada.com.ph/products/pdp-i7109771.html *(or search "zip ties 100pcs")*
+
+---
+
+## Battery Backup Add-On (UPS + 18650) — 4 devices/poles
+
+Bolt-on UPS branch per supply so a mains outage never stops a measurement, snapshot, or beam (design + sizing table: [HARDWARE.md §5.5](HARDWARE.md#55-battery-backup-ups-option--one-18650-per-supply)). Lazada prices checked Sep 2026 — verify before ordering.
+
+| # | Component | Qty (per device) | Qty (4 devices) | Unit | Subtotal | Rating / Sold | URL |
+|---|-----------|---:|---:|---:|---:|---|---|
+| B1 | LiitoKala Lii-35S+ 18650 3500 mAh protected cell | 4 | **16** | ≈ ₱125 | ₱2,000 | LiitoKala store, 4.8★ · 554 sold (2-pc listing) | https://www.lazada.com.ph/products/pdp-i15527417666.html |
+| B2 | 18650 single holder w/ wire leads | 4 | 16 | ≈ ₱20 | ₱320 | 4.9★ · 3.7K sold | https://www.lazada.com.ph/tag/18650-battery-holder-with-wire/ (search single) |
+| B3 | TP4056 Type-C/MicroUSB 1 A charger + protection | 4 | 16 | ₱25 | ₱400 | 4.9★ · 10.6K sold, Bulacan | https://www.lazada.com.ph/products/type-c-micro-usb-5v-1a-18650-tp4056-lithium-battery-charger-module-charging-board-with-protection-i109875975.html |
+| B4 | MT3608 boost module (set 5.0 V) | 4 | 16 | ₱26 | ₱416 | 4.7★ · 267+ (tag ≥ 4.7★) | https://www.lazada.com.ph/products/pdp-i3406468475.html |
+| B5 | SS34 3 A 40 V Schottky (backfeed blocking) | 4 | 16 | ≈ ₱3 | ₱48 | 5.0★ · 52 (tag) | https://www.lazada.com.ph/products/pdp-i15606165072.html |
+| | **Battery backup total** | | | | **≈ ₱3,184** | ≈ ₱796/device | |
+
+**Config per device:** every supply (#1–#4) — hub, CAM, and **both far-post laser TXs** — gets exactly **one protected 18650 in a single holder** + TP4056 + MT3608 @ 5.0 V + SS34 — no fuse, no paralleling, no balancing needed (4 h max runtime sizing: [HARDWARE.md §5.5](HARDWARE.md#55-battery-backup-ups-option--one-18650-per-supply)). The beams are battery-backed too: a mains outage can't kill either laser.
+
+**Costs:** ≈ ₱796/device on top of the ₱2,328 recommended build → **≈ ₱3,124/device, ≈ ₱12,496 for all four poles** — laser beams included. Recommended with it: the two far-post IP65 boxes (Deluxe option, +₱120) since the TX housings now hold the UPS branch.
+
+**Critical:** use only **protected** cells (TP4056-with-protection) and one cell per holder — never parallel cells in this design; charge each cell fully before install.
 
 ---
 
