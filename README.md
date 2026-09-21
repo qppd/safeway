@@ -117,7 +117,8 @@ safeway/
 │   ├── FLOWCHART.md        ← runtime decision logic
 │   ├── SYSTEM-ARCHITECTURE.md ← layers, interfaces, failure modes
 ├── wiring/
-│   └── circuit_image.png   ← full circuit diagram (Cirkit Designer)
+│   └── circuit_image.png               ← full circuit diagram (Cirkit Designer)
+│   └── CDM324_LM358_ESP32_Testing_Guide.md  ← step-by-step LM358 build & test guide
 ├── .gitignore              ← repo hygiene rules
 └── LICENSE                 ← CC BY 4.0
 ```
@@ -126,9 +127,10 @@ safeway/
 
 The complete build is organized into five stage guides. Follow them in order:
 
-| Step | Guide | What you'll do |
-|---:|---|---|
-| 1 | **[docs/HARDWARE.md](docs/HARDWARE.md)** | Verify the radar's IF output, wire the hub (radar + laser break-beam #1 + buzzer) and the CAM (break-beam #2 → GPIO 21), set up the CAM board, assemble into the enclosure |
+|| Step | Guide | What you'll do |
+||---:|---|---|
+|| 1 | **[docs/HARDWARE.md](docs/HARDWARE.md)** | Verify the radar's IF output, wire the hub (radar + laser break-beam #1 + buzzer) and the CAM (break-beam #2 → GPIO 21), set up the CAM board, assemble into the enclosure |
+|| 1a | **[wiring/CDM324_LM358_ESP32_Testing_Guide.md](wiring/CDM324_LM358_ESP32_Testing_Guide.md)** | Step-by-step LM358 signal conditioner build & test — power, 2.5V bias, Stage 1 & 2 amps, radar input, comparator gate before connecting to ESP32 GPIO34 |
 | 2 | **[docs/FIRMWARE.md](docs/FIRMWARE.md)** | Set up Arduino IDE, flash both boards (camera server + sensor hub), tune speed limit + angles |
 | 3 | **[docs/BACKEND.md](docs/BACKEND.md)** | Stand up the cloud API + database + monitoring dashboard with live feed |
 | 4 | **[docs/TESTING.md](docs/TESTING.md)** | Bench-test each board, calibrate Doppler accuracy, run the ISO-based evaluation |
@@ -175,7 +177,8 @@ Software quality is assessed against **ISO/IEC 25010** and the IoT architecture 
 | [BLOCK-DIAGRAM.md](docs/BLOCK-DIAGRAM.md) | Hardware blocks, signals, power distribution |
 | [FLOWCHART.md](docs/FLOWCHART.md) | Runtime logic — event pipeline, server pipeline, dashboard flow |
 | [SYSTEM-ARCHITECTURE.md](docs/SYSTEM-ARCHITECTURE.md) | Layers, component responsibilities, interfaces, failure modes |
-| [wiring/circuit_image.png](wiring/circuit_image.png) | Full circuit diagram — hub, radar, both break-beams, buzzer, far-post lasers ([Cirkit Designer project](https://app.cirkitdesigner.com/project/192cfce5-5705-47b2-8c56-7a07da66e9da)) |
+|| [wiring/circuit_image.png](wiring/circuit_image.png) | Full circuit diagram — hub, radar, both break-beams, buzzer, far-post lasers ([Cirkit Designer project](https://app.cirkitdesigner.com/project/192cfce5-5705-47b2-8c56-7a07da66e9da)) |
+|| [wiring/CDM324_LM358_ESP32_Testing_Guide.md](wiring/CDM324_LM358_ESP32_Testing_Guide.md) | Step-by-step LM358 signal conditioner build & test — power, 2.5V bias, Stage 1 & 2 amps, radar input, comparator gate before connecting to ESP32 GPIO34 |
 
 ## Author
 
