@@ -125,12 +125,12 @@ safeway/
 
 ## Build Guide
 
-The complete build is organized into five stage guides. Follow them in order:
+The complete build is organized into six stage guides. Follow them in order:
 
-|| Step | Guide | What you'll do |
-||---:|---|---|
-|| 1 | **[docs/HARDWARE.md](docs/HARDWARE.md)** | Verify the radar's IF output, wire the hub (radar + laser break-beam #1 + buzzer) and the CAM (break-beam #2 → GPIO 21), set up the CAM board, assemble into the enclosure |
-|| 1a | **[wiring/CDM324_LM358_ESP32_Testing_Guide.md](wiring/CDM324_LM358_ESP32_Testing_Guide.md)** | Step-by-step LM358 signal conditioner build & test — power, 2.5V bias, Stage 1 & 2 amps, radar input, comparator gate before connecting to ESP32 GPIO34 |
+| Step | Guide | What you'll do |
+|---:|---|---|
+| 1 | **[docs/HARDWARE.md](docs/HARDWARE.md)** | Verify the radar's IF output, wire the hub (radar + laser break-beam #1 + buzzer) and the CAM (break-beam #2 → GPIO 21), set up the CAM board, assemble into the enclosure |
+| 1a | **[wiring/CDM324_LM358_ESP32_Testing_Guide.md](wiring/CDM324_LM358_ESP32_Testing_Guide.md)** | Step-by-step LM358 signal conditioner build & test — power, 2.5V bias, Stage 1 & 2 amps, radar input, comparator gate before connecting to ESP32 GPIO34 |
 | 2 | **[docs/FIRMWARE.md](docs/FIRMWARE.md)** | Set up Arduino IDE, flash both boards (camera server + sensor hub), tune speed limit + angles |
 | 3 | **[docs/BACKEND.md](docs/BACKEND.md)** | Stand up the cloud API + database + monitoring dashboard with live feed |
 | 4 | **[docs/TESTING.md](docs/TESTING.md)** | Bench-test each board, calibrate Doppler accuracy, run the ISO-based evaluation |
